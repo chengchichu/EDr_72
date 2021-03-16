@@ -36,8 +36,11 @@ from xgboost.sklearn import XGBClassifier
 from imblearn.under_sampling import OneSidedSelection
 import re
 from sklearn.neural_network import MLPClassifier
+from sklearn.impute import SimpleImputer
 
-def pre_encode(data,tag):
+def pre_encode(data,tag,key):
+    
+    scale_param = []
     if tag == 1: # ordinal encoding
 #       encoder = OrdinalEncoder()
 #       out = encoder.fit_transform(data)
@@ -45,6 +48,22 @@ def pre_encode(data,tag):
        s_data = scaler.fit_transform(data) 
 #       out = np.squeeze(s_data)
        out = s_data
+       scale_param = [scaler.mean_, np.sqrt(scaler.var_)]
+    elif tag == 0:   
+       encoder = OneHotEncoder(sparse=False)
+       out = encoder.fit_transform(data)
+    else:  
+       out = data 
+         
+    return out, scale_param
+
+def test_encode(data,tag,scale_param):
+    
+    if tag == 1: # ordinal encoding
+       # normalization
+       s_data = (data-scale_param[0])/scale_param[1]
+       out = s_data
+
     elif tag == 0:   
        encoder = OneHotEncoder(sparse=False)
        out = encoder.fit_transform(data)
@@ -53,27 +72,7 @@ def pre_encode(data,tag):
          
     return out
 
-def add_cat(data, lab, new_cat):
-    tmp = (data[lab].isnull()) | (data[lab].isna())
-    miss_idx = np.where(tmp.values)[0]
-#    miss_idx = [i for i in boolidx.index if boolidx[i]]
-    print('共有{}個缺失值'.format(len(miss_idx)))
-    if miss_idx.size>0:
-       for i in range(len(miss_idx)):
-#           data[lab].set_value([miss_idx[i], new_cat)
-            data.at[miss_idx[i],lab] = new_cat
-    return data
 
-def add_avg(data, lab):
-    tmp = (data[lab].isnull()) | (data[lab].isna())
-    miss_idx = np.where(tmp.values)[0]
-    print('共有{}個缺失值'.format(len(miss_idx)))
-    avg = np.median(data[lab][~tmp.values])     
-    if miss_idx.size>0:
-       for i in range(len(miss_idx)):
-#           data[lab].set_value(miss_idx[i], avg) 
-           data.at[miss_idx[i],lab] = avg
-    return data    
 
 # 檢查是否有非數值的符號
 def assert_number(data, lab):
@@ -148,6 +147,39 @@ def ml_model(clf,data_X,data_y):
     bst = models[np.argmax(aucs)]
     return bst, models, k_idx, aucs
 
+def model_xgb(clf,data_X,data_y):
+    # 10 fold
+    kfold = KFold(10, True, 1)
+    aucs = []
+    models = []
+    k_idx = []
+    data_size = np.arange(0,data_X.shape[0])
+    for train, test in kfold.split(data_size):
+        it_idx = {}
+        it_idx['train'] = train
+        it_idx['test'] = test
+        k_idx.append(it_idx)
+        
+        xtrain = data_X[data_size[train],:]
+        ytrain = data_y[data_size[train]]
+        xtest = data_X[data_size[test],:]
+        ytest = data_y[data_size[test]]
+                     
+        eval_set = [(xtrain,ytrain),(xtest,ytest)]
+        
+        model = clf.fit(xtrain, ytrain, eval_metric = "error", eval_set = eval_set)
+        results = model.evals_result()
+        #print(results)            
+        area_under_ROC = model_auc(model, xtest, ytest)
+        aucs.append(area_under_ROC[0])
+        models.append(model)
+        
+    # selection model with best AUC
+    bst = models[np.argmax(aucs)]
+    return bst, models, k_idx, aucs
+
+
+
 def get_ICD_cat(data, icd_tag):
 #    pmatch = re.compile(r'[A-Za-z]') # 是否英文字母
     for i in range(len(data)):   
@@ -194,7 +226,7 @@ if __name__ == '__main__':
     #df = pd.read_excel('/Users/chengchichu/Desktop/EHR/CGRDER_20210310_v5.xlsx', sheet_name = 'CGRDER_107108R22')   
     
     #df = pd.read_excel('/home/anpo/Desktop/pyscript/EDr_72/CGRDER_20210310_v6.xlsx', sheet_name = 'CGRDER_20210310_V6')   
-    df = pd.read_excel('/home/anpo/Desktop/pyscript/EDr_72/CGRDER_20210312_v7.xlsx', sheet_name = 'CGRDER_107108R24')
+    #df = pd.read_excel('/home/anpo/Desktop/pyscript/EDr_72/CGRDER_20210312_v7.xlsx', sheet_name = 'CGRDER_107108R24')
 #cols = ['LOC',	'SEX',	'DPT',	'DRNO',	'ANISICCLSF_C',	'INTY',	'ER_LOS'	, 'age1', 'week', 'weekday',	'indate_time_gr', 'ER_visit_30', 'ER_visit_365', 'TMP',	'PULSE', 'BPS',	'BPB',	'GCSE',	'GCSV',	'GCSM', 'BRTCNT','SPAO2']  
 # 先拿掉 醫師identity 年資深淺 跟 舒張壓 cutoff?
 ## Data preprocessing and encoding, 0 : one-hot 2: intact 1:連續數值標準
@@ -273,53 +305,60 @@ if __name__ == '__main__':
         
     
     df_cat = df[cols.keys()]
+    y72 = df['re72'] 
     
-    pr = get_nan_pr(df_cat,cols)
+    #=== 切分 train and test set
+    X_train, X_test, y_train, y_test = train_test_split(df_cat, y72, test_size=0.3, random_state=42)
+    
+    #X = X_train
+    
+    pr = get_nan_pr(X_train,cols)
     
     # whether use a subset to build the model, data without any missing value or do imputation   
     use_subset = False
     if (use_subset):
-       X = df_cat.dropna()     
-       nnnidx = get_subset_index(df_cat, cols)
-       y72 = df['re72'][nnnidx]
+        X = X_train.dropna()     
+        nnnidx = get_subset_index(X_train, cols)
+        y72 = y_train[nnnidx]
     
     else:
-        X = df_cat
-        y72 = df['re72'] 
+       X = X_train      
+       y72 = y_train
         
         ## Data imputation
         # 到院方式, 缺失當new category, 其他中位數避免 outlier, missing的多少？
-        X = add_cat(X, 'INTY', 10)
+       #X = add_cat(X, 'INTY', 10)
         #X = add_cat(X, 'ICD', 'NNN') #缺失的類別
             
-      #  X = assert_number(X, 'ER_LOS'	)
-      #  X = assert_number(X, 'TMP')
-      #  X = assert_number(X, 'PULSE')
-      #  X = assert_number(X, 'BPS')
-      #  X = assert_number(X, 'BRTCNT')
-      #  X = assert_number(X, 'SPAO2')
-        X = assert_number(X, 'Dr_VSy'	)
-        X = assert_number(X, 'WEIGHT'	)
-        X = assert_number(X, 'SBP'	)
-        X = assert_number(X, 'DBP'	)
-         
-        X = add_avg(X, 'ER_LOS'	)
-        X = add_avg(X, 'TMP')
-        X = add_avg(X, 'PULSE')
-        X = add_avg(X, 'BPS')
-        X = add_avg(X, 'BRTCNT')
-        X = add_avg(X, 'SPAO2')
-        X = add_avg(X, 'Dr_VSy'	)
-        X = add_avg(X, 'WEIGHT'	)
-        X = add_avg(X, 'SBP'	)
-        X = add_avg(X, 'DBP'	)
+       # 新增類別不太適合, 缺失太少, train test split 類別不平均 
+       X['INTY'].fillna(value=6, inplace=True)
+        
+       X = assert_number(X, 'ER_LOS'	)
+       X = assert_number(X, 'age1')
+       X = assert_number(X, 'Dr_VSy'	)
+       X = assert_number(X, 'WEIGHT'	)
+       X = assert_number(X, 'SBP'	)
+       X = assert_number(X, 'DBP'	)
+                 
+       fs_to_imp = ['ER_LOS','TMP','PULSE','BPS','BRTCNT','SPAO2','Dr_VSy','WEIGHT','SBP','DBP']
+        
+       imp = SimpleImputer(missing_values=np.nan, strategy='median')
+        
+       imp.fit(X[fs_to_imp]) 
+       impdata = imp.transform(X[fs_to_imp])
+        
+       cnt = 0
+       for i in fs_to_imp:
+           print(i)
+           X[i] = impdata[:,cnt]
+           cnt+=1
         
         # vital sign 類別化
-        X = add_cut(X, 'TMP', [36, 37.5, 39]) # 體溫
-        X = add_cut(X, 'PULSE', [60, 100]) # 
-        X = add_cut(X, 'BPS', [90, 130]) # 收縮壓
-        X = add_cut(X, 'BRTCNT', [12, 20]) #
-        X = add_cut(X, 'SPAO2', [94]) #
+       X = add_cut(X, 'TMP', [36, 37.5, 39]) # 體溫
+       X = add_cut(X, 'PULSE', [60, 100]) # 
+       X = add_cut(X, 'BPS', [90, 130]) # 收縮壓
+       X = add_cut(X, 'BRTCNT', [12, 20]) #
+       X = add_cut(X, 'SPAO2', [94]) #
         
         #抓 ICD code的第一個字母
         #X = get_ICD_cat(X, 'ICD')
@@ -331,12 +370,15 @@ if __name__ == '__main__':
     # preprocessing encoding
     preprocessed_X = []
     encoding_head = []
+    scale_params = {}
     cnt = 0
+    mcnt0 = []
     for key, value in cols.items():
         print(key)
         data_col = X_[key].values.reshape(-1,1)
-        out = pre_encode(data_col, value)
-    #    print(out.shape[1])
+        out, scale_param = pre_encode(data_col, value, key)
+        scale_params[key] = scale_param
+  
         # n-1 for dummy variable, this means reference group is the first column
         if out.shape[1]>1:
            out = out[:,1:(out.shape[1])]
@@ -344,6 +386,7 @@ if __name__ == '__main__':
         ec = [key for i in range(out.shape[1])]
         encoding_head.append(ec)
         print(out.shape[1])   
+        mcnt0.append(out.shape[1])
         #initialize
         if cnt == 0:
            preprocessed_X = out
@@ -355,22 +398,20 @@ if __name__ == '__main__':
     encoding_head_flat = [j for i in encoding_head for j in i]   
         
     
-    #=== 切分 train and test set
-    X_train, X_test, y_train, y_test = train_test_split(preprocessed_X, y72_.values, test_size=0.3, random_state=42)
     
     #======imbalanced 處理？
     unbalanced_corret = True
     if unbalanced_corret:
        undersample = OneSidedSelection(n_neighbors=1, n_seeds_S=10000)
-       reX, rey = undersample.fit_resample(X_train, y_train)
+       reX, rey = undersample.fit_resample(preprocessed_X, y72_)
        # combined with bootstrap
        cnt = Counter(rey)
        # major class
        np.random.seed(0)
-       major_idx = np.random.choice(cnt[0],100000,replace = True)
+       major_idx = np.random.choice(cnt[0],50000,replace = True)
         # minor class
        np.random.seed(1)
-       minor_idx = np.random.choice(cnt[1],100000,replace = True)
+       minor_idx = np.random.choice(cnt[1],50000,replace = True)
           
        X_major = reX[0:cnt[0],:] 
        X_minor = reX[cnt[0]:len(rey),:]
@@ -380,8 +421,8 @@ if __name__ == '__main__':
        X_train_c = np.concatenate((X_major[major_idx,:], X_minor[minor_idx,:]), axis = 0)
        y_train_c = np.concatenate((y_major[major_idx], y_minor[minor_idx]))
     else:
-       X_train_c = X_train
-       y_train_c = y_train 
+       X_train_c = preprocessed_X
+       y_train_c = y72_ 
     # ## 跑model  
     
     #clf = LogisticRegression(random_state=0, max_iter=2000)
@@ -389,16 +430,73 @@ if __name__ == '__main__':
     clf = XGBClassifier(use_label_encoder=False,eval_metric="error")
     #clf = MLPClassifier(random_state=1, max_iter=300)
         
-    bst, models, kidx, aucs = ml_model(clf, X_train_c, y_train_c)
+    #bst, models, kidx, aucs = ml_model(clf, X_train_c, y_train_c)
     
-    confusion_matrix(y_test, bst.predict(X_test))
+    bst, models, kidx, aucs = model_xgb(clf, X_train_c, y_train_c)
     
-    #ypred = bst.predict(X_test)
-    #ypred = bst.predict_proba(X_test)[:,1]
-    #fpr, tpr, _ = roc_curve(y_test, ypred)
-    #roc_auc = auc(fpr, tpr)
     
-    metrics.plot_roc_curve(bst, X_test, y_test) 
+
+    
+    
+    # test data processing
+    
+    X_test['INTY'].fillna(value=6, inplace=True)
+    X_test = assert_number(X_test, 'ER_LOS'	)
+    X_test = assert_number(X_test, 'age1')
+    X_test = assert_number(X_test, 'Dr_VSy'	)
+    X_test = assert_number(X_test, 'WEIGHT'	)
+    X_test = assert_number(X_test, 'SBP'	)
+    X_test = assert_number(X_test, 'DBP'	)
+         
+    
+    # fs_to_imp = ['ER_LOS','TMP','PULSE','BPS','BRTCNT','SPAO2','Dr_VSy','WEIGHT','SBP','DBP']
+        
+    # imp = SimpleImputer(missing_values=np.nan, strategy='median')
+        
+    # imp.fit(X_train[fs_to_imp]) 
+    impdata = imp.transform(X_test[fs_to_imp])
+        
+    cnt = 0
+    for i in fs_to_imp:
+            print(i)
+            X_test[i] = impdata[:,cnt]
+            cnt+=1
+        
+        # vital sign 類別化
+    X_test = add_cut(X_test, 'TMP', [36, 37.5, 39]) # 體溫
+    X_test = add_cut(X_test, 'PULSE', [60, 100]) # 
+    X_test = add_cut(X_test, 'BPS', [90, 130]) # 收縮壓
+    X_test = add_cut(X_test, 'BRTCNT', [12, 20]) #
+    X_test = add_cut(X_test, 'SPAO2', [94]) #
+    
+       # preprocessing encoding
+    preprocessed_X_test = []
+    cnt = 0
+    mcnt = []
+    for key, value in cols.items():
+        print(key)
+        data_col = X_test[key].values.reshape(-1,1)
+        scale_param = scale_params[key]
+        out = test_encode(data_col, value, scale_param)
+
+        # n-1 for dummy variable, this means reference group is the first column
+        if out.shape[1]>1:
+           out = out[:,1:(out.shape[1])]
+
+        print(out.shape[1])
+        mcnt.append(out.shape[1])
+        #initialize
+        if cnt == 0:
+           preprocessed_X_test = out
+        else:
+           preprocessed_X_test = np.concatenate((preprocessed_X_test, out), axis = 1) 
+           
+        cnt += 1
+    
+    
+    confusion_matrix(y_test, bst.predict(preprocessed_X_test))
+    
+    metrics.plot_roc_curve(bst, preprocessed_X_test, y_test) 
 
 
 ## if model is LG
@@ -643,3 +741,36 @@ plt.setp(ax.get_xticklabels(), rotation=90)
 #    t =  coefs/se  
 #    p = (1 - norm.cdf(abs(t))) * 2
 #    return p
+
+# def add_cat(data, lab, new_cat):
+#     tmp = (data[lab].isnull()) | (data[lab].isna())
+#     miss_idx = np.where(tmp.values)[0]
+# #    miss_idx = [i for i in boolidx.index if boolidx[i]]
+#     print('共有{}個缺失值'.format(len(miss_idx)))
+#     if miss_idx.size>0:
+#        for i in range(len(miss_idx)):
+#            data.at[miss_idx[i],lab] = new_cat
+#     return data
+
+# def add_avg(data, lab):
+# #     tmp = (data[lab].isnull()) | (data[lab].isna())
+# #     miss_idx = np.where(tmp.values)[0]
+# #     print('共有{}個缺失值'.format(len(miss_idx)))
+# #     avg = np.median(data[lab][~tmp.values])     
+# #     if miss_idx.size>0:
+# #        for i in range(len(miss_idx)):
+# # #           data[lab].set_value(miss_idx[i], avg) 
+# #            data.at[miss_idx[i],lab] = avg
+#     imp = SimpleImputer(missing_values=np.nan, strategy='median')
+#     imp.fit([[1, 2], [np.nan, 3], [7, 6]])
+
+
+#     return data, avg    
+
+# def fill_avg(data, lab, avg):
+#     tmp = (data[lab].isnull()) | (data[lab].isna())
+#     miss_idx = np.where(tmp.values)[0]
+#     if miss_idx.size>0:
+#        for i in range(len(miss_idx)):
+#            data.at[miss_idx[i],lab] = avg
+#     return data
