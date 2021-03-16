@@ -37,6 +37,8 @@ from imblearn.under_sampling import OneSidedSelection
 import re
 from sklearn.neural_network import MLPClassifier
 from sklearn.impute import SimpleImputer
+from imblearn.under_sampling import CondensedNearestNeighbour
+from imblearn.under_sampling import NearMiss
 
 def pre_encode(data,tag,key):
     
@@ -167,7 +169,7 @@ def model_xgb(clf,data_X,data_y):
                      
         eval_set = [(xtrain,ytrain),(xtest,ytest)]
         
-        model = clf.fit(xtrain, ytrain, eval_metric = "error", eval_set = eval_set)
+        model = clf.fit(xtrain, ytrain, early_stopping_rounds=20, eval_metric = "error", eval_set = eval_set)
         results = model.evals_result()
         #print(results)            
         area_under_ROC = model_auc(model, xtest, ytest)
@@ -176,26 +178,26 @@ def model_xgb(clf,data_X,data_y):
         
     # selection model with best AUC
     bst = models[np.argmax(aucs)]
-    return bst, models, k_idx, aucs
+    return bst, models, k_idx, aucs, eval_set
 
 
 
-def get_ICD_cat(data, icd_tag):
-#    pmatch = re.compile(r'[A-Za-z]') # 是否英文字母
-    for i in range(len(data)):   
-#    for i in data.iterrows():
-        icd_code = data.loc[i, icd_tag]
-#        print(icd_code)
-        matchobj = re.finditer(r'[A-Za-z]', icd_code)
-#        print(len(list(matchobj)))
-        if (len(list(matchobj)) < 3) : # NN 為缺失值, len = 2
-           data.at[i, icd_tag] = icd_code[0]
-#           for j in re.finditer(r'[A-Za-z]', icd_code):
-##               print(icd_code[j.start()])
-##               data.loc[i, icd_tag] = icd_code[j.start()]
-#               data.at[i, icd_tag] = icd_code[j.start()]
-#    print(m.start(), m.group())   
-    return data
+# def get_ICD_cat(data, icd_tag):
+# #    pmatch = re.compile(r'[A-Za-z]') # 是否英文字母
+#     for i in range(len(data)):   
+# #    for i in data.iterrows():
+#         icd_code = data.loc[i, icd_tag]
+# #        print(icd_code)
+#         matchobj = re.finditer(r'[A-Za-z]', icd_code)
+# #        print(len(list(matchobj)))
+#         if (len(list(matchobj)) < 3) : # NN 為缺失值, len = 2
+#            data.at[i, icd_tag] = icd_code[0]
+# #           for j in re.finditer(r'[A-Za-z]', icd_code):
+# ##               print(icd_code[j.start()])
+# ##               data.loc[i, icd_tag] = icd_code[j.start()]
+# #               data.at[i, icd_tag] = icd_code[j.start()]
+# #    print(m.start(), m.group())   
+#     return data
 
 def get_nan_pr(data,cols):
     pr = []
@@ -204,17 +206,17 @@ def get_nan_pr(data,cols):
         pr.append(sum(tmp)/len(df))  
     return pr  
 
-def get_subset_index(data,cols):
-    cnt = 0
-    for i in cols.keys():
-        tmp = (data[i].isnull()) | (data[i].isna())
-        if (cnt == 0): 
-            allnan = tmp
-        else:    
-            allnan = allnan | tmp
-        cnt += 1
-        index = ~allnan
-    return index     
+# def get_subset_index(data,cols):
+#     cnt = 0
+#     for i in cols.keys():
+#         tmp = (data[i].isnull()) | (data[i].isna())
+#         if (cnt == 0): 
+#             allnan = tmp
+#         else:    
+#             allnan = allnan | tmp
+#         cnt += 1
+#         index = ~allnan
+#     return index     
 # ####### where the code start 
 
 if __name__ == '__main__':
@@ -227,6 +229,7 @@ if __name__ == '__main__':
     
     #df = pd.read_excel('/home/anpo/Desktop/pyscript/EDr_72/CGRDER_20210310_v6.xlsx', sheet_name = 'CGRDER_20210310_V6')   
     #df = pd.read_excel('/home/anpo/Desktop/pyscript/EDr_72/CGRDER_20210312_v7.xlsx', sheet_name = 'CGRDER_107108R24')
+    df = pd.read_csv('/home/anpo/Desktop/pyscript/EDr_72/CGRDER_20210312_v7.csv')
 #cols = ['LOC',	'SEX',	'DPT',	'DRNO',	'ANISICCLSF_C',	'INTY',	'ER_LOS'	, 'age1', 'week', 'weekday',	'indate_time_gr', 'ER_visit_30', 'ER_visit_365', 'TMP',	'PULSE', 'BPS',	'BPB',	'GCSE',	'GCSV',	'GCSM', 'BRTCNT','SPAO2']  
 # 先拿掉 醫師identity 年資深淺 跟 舒張壓 cutoff?
 ## Data preprocessing and encoding, 0 : one-hot 2: intact 1:連續數值標準
@@ -308,7 +311,7 @@ if __name__ == '__main__':
     y72 = df['re72'] 
     
     #=== 切分 train and test set
-    X_train, X_test, y_train, y_test = train_test_split(df_cat, y72, test_size=0.3, random_state=42)
+    X_train, X_test, y_train, y_test = train_test_split(df_cat, y72, test_size=0.3, random_state=40)
     
     #X = X_train
     
@@ -403,36 +406,40 @@ if __name__ == '__main__':
     unbalanced_corret = True
     if unbalanced_corret:
        undersample = OneSidedSelection(n_neighbors=1, n_seeds_S=10000)
-       reX, rey = undersample.fit_resample(preprocessed_X, y72_)
+       #undersample = CondensedNearestNeighbour(n_neighbors=1)
+       #undersample = NearMiss(version=1,n_neighbors = 3)
+       reX, rey = undersample.fit_resample(preprocessed_X, y72_.values)
        # combined with bootstrap
-       cnt = Counter(rey)
-       # major class
-       np.random.seed(0)
-       major_idx = np.random.choice(cnt[0],50000,replace = True)
-        # minor class
-       np.random.seed(1)
-       minor_idx = np.random.choice(cnt[1],50000,replace = True)
+      
+       # # major class
+       # np.random.seed(0)
+       # major_idx = np.random.choice(cnt[0],50000,replace = True)
+       #  # minor class
+       # np.random.seed(1)
+       # minor_idx = np.random.choice(cnt[1],50000,replace = True)
           
-       X_major = reX[0:cnt[0],:] 
-       X_minor = reX[cnt[0]:len(rey),:]
-       y_major = rey[0:cnt[0]]
-       y_minor = rey[cnt[0]:len(rey)]
+       # X_major = reX[0:cnt[0],:] 
+       # X_minor = reX[cnt[0]:len(rey),:]
+       # y_major = rey[0:cnt[0]]
+       # y_minor = rey[cnt[0]:len(rey)]
        
-       X_train_c = np.concatenate((X_major[major_idx,:], X_minor[minor_idx,:]), axis = 0)
-       y_train_c = np.concatenate((y_major[major_idx], y_minor[minor_idx]))
+       # X_train_c = np.concatenate((X_major[major_idx,:], X_minor[minor_idx,:]), axis = 0)
+       # y_train_c = np.concatenate((y_major[major_idx], y_minor[minor_idx]))
+       X_train_c = reX
+       y_train_c = rey
     else:
        X_train_c = preprocessed_X
-       y_train_c = y72_ 
+       y_train_c = y72_.values 
     # ## 跑model  
     
-    #clf = LogisticRegression(random_state=0, max_iter=2000)
-    #clf = RandomForestClassifier(random_state=0)  ## 隨機森林
-    clf = XGBClassifier(use_label_encoder=False,eval_metric="error")
+    clf = LogisticRegression(random_state=0, max_iter=2000)
+    #clf = RandomForestClassifier(random_state=0, class_weight='balanced')  ## 隨機森林
+    #clf = XGBClassifier(use_label_encoder=False,eval_metric="error")
     #clf = MLPClassifier(random_state=1, max_iter=300)
         
-    #bst, models, kidx, aucs = ml_model(clf, X_train_c, y_train_c)
+    bst, models, kidx, aucs = ml_model(clf, X_train_c, y_train_c)
     
-    bst, models, kidx, aucs = model_xgb(clf, X_train_c, y_train_c)
+    #bst, models, kidx, aucs, eval_set = model_xgb(clf, X_train_c, y_train_c)
     
     
 
@@ -451,9 +458,10 @@ if __name__ == '__main__':
     
     # fs_to_imp = ['ER_LOS','TMP','PULSE','BPS','BRTCNT','SPAO2','Dr_VSy','WEIGHT','SBP','DBP']
         
-    # imp = SimpleImputer(missing_values=np.nan, strategy='median')
+    # imp2 = SimpleImputer(missing_values=np.nan, strategy='median')
         
-    # imp.fit(X_train[fs_to_imp]) 
+    # imp2.fit(X_test[fs_to_imp]) 
+
     impdata = imp.transform(X_test[fs_to_imp])
         
     cnt = 0
@@ -500,14 +508,14 @@ if __name__ == '__main__':
 
 
 ## if model is LG
-importance = bst.coef_[0]
-assert(len(encoding_head_flat) == len(importance))
+# importance = bst.coef_[0]
+# assert(len(encoding_head_flat) == len(importance))
 
-fig, ax = plt.subplots(figsize=(12, 6))
-plt.bar(np.arange(0,len(importance)), importance)
-ax.set_xticks(np.arange(0, len(encoding_head_flat), step=1)) 
-ax.set_xticklabels(encoding_head_flat) 
-plt.setp(ax.get_xticklabels(), rotation=90)
+# fig, ax = plt.subplots(figsize=(12, 6))
+# plt.bar(np.arange(0,len(importance)), importance)
+# ax.set_xticks(np.arange(0, len(encoding_head_flat), step=1)) 
+# ax.set_xticklabels(encoding_head_flat) 
+# plt.setp(ax.get_xticklabels(), rotation=90)
 
 # if XGB
 #fig, ax = plt.subplots(figsize=(12, 6))
