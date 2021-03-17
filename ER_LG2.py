@@ -129,7 +129,7 @@ def model_auc(model, preprocessed_X, y_true):
     return roc_auc, auprc
 
 def ml_model(clf,data_X,data_y):
-    # 10 fold
+    # 10 fold        
     kfold = KFold(10, True, 1)
     aucs = []
     models = []
@@ -140,7 +140,14 @@ def ml_model(clf,data_X,data_y):
         it_idx['train'] = train
         it_idx['test'] = test
         k_idx.append(it_idx)
-        model = clf.fit(data_X[data_size[train],:], data_y[data_size[train]])
+        
+        # 只對xtrain做bootstrapping
+        xtrain = data_X[data_size[train],:]
+        ytrain = data_y[data_size[train]]
+        
+        xtrain, ytrain = bootstrap(xtrain, ytrain)
+        
+        model = clf.fit(xtrain, ytrain)
         area_under_ROC = model_auc(model, data_X[data_size[test],:], data_y[data_size[test]])
         aucs.append(area_under_ROC[0])
         models.append(model)
@@ -166,10 +173,12 @@ def model_xgb(clf,data_X,data_y):
         ytrain = data_y[data_size[train]]
         xtest = data_X[data_size[test],:]
         ytest = data_y[data_size[test]]
+        
+        xtrain, ytrain = bootstrap(xtrain, ytrain)
                      
         eval_set = [(xtrain,ytrain),(xtest,ytest)]
         
-        model = clf.fit(xtrain, ytrain, early_stopping_rounds=20, eval_metric = "error", eval_set = eval_set)
+        model = clf.fit(xtrain, ytrain, early_stopping_rounds=5, eval_metric = "error", eval_set = eval_set)
         results = model.evals_result()
         #print(results)            
         area_under_ROC = model_auc(model, xtest, ytest)
@@ -178,10 +187,29 @@ def model_xgb(clf,data_X,data_y):
         
     # selection model with best AUC
     bst = models[np.argmax(aucs)]
+    print(aucs)
     return bst, models, k_idx, aucs, eval_set
 
-
-
+def bootstrap(datax,datay):    
+    # combined with bootstrap
+    # major class
+    cnt = Counter(datay)
+    np.random.seed(0)
+    major_idx = np.random.choice(cnt[0],int(cnt[0]*1.5),replace = True)
+    # minor class
+    np.random.seed(1)
+    minor_idx = np.random.choice(cnt[1],int(cnt[0]*1.5),replace = True)
+          
+    X_major = datax[0:cnt[0],:] 
+    X_minor = datax[cnt[0]:len(datay),:]
+    y_major = datay[0:cnt[0]]
+    y_minor = datay[cnt[0]:len(datay)]
+       
+    datax_balanced = np.concatenate((X_major[major_idx,:], X_minor[minor_idx,:]), axis = 0)
+    datay_balanced = np.concatenate((y_major[major_idx], y_minor[minor_idx]))
+    
+    return datax_balanced, datay_balanced
+    
 # def get_ICD_cat(data, icd_tag):
 # #    pmatch = re.compile(r'[A-Za-z]') # 是否英文字母
 #     for i in range(len(data)):   
@@ -229,7 +257,7 @@ if __name__ == '__main__':
     
     #df = pd.read_excel('/home/anpo/Desktop/pyscript/EDr_72/CGRDER_20210310_v6.xlsx', sheet_name = 'CGRDER_20210310_V6')   
     #df = pd.read_excel('/home/anpo/Desktop/pyscript/EDr_72/CGRDER_20210312_v7.xlsx', sheet_name = 'CGRDER_107108R24')
-    df = pd.read_csv('/home/anpo/Desktop/pyscript/EDr_72/CGRDER_20210312_v7.csv')
+    df = pd.read_csv('/home/anpo/Desktop/pyscript/EDr_72/CGRDER_20210317_v8.csv')
 #cols = ['LOC',	'SEX',	'DPT',	'DRNO',	'ANISICCLSF_C',	'INTY',	'ER_LOS'	, 'age1', 'week', 'weekday',	'indate_time_gr', 'ER_visit_30', 'ER_visit_365', 'TMP',	'PULSE', 'BPS',	'BPB',	'GCSE',	'GCSV',	'GCSM', 'BRTCNT','SPAO2']  
 # 先拿掉 醫師identity 年資深淺 跟 舒張壓 cutoff?
 ## Data preprocessing and encoding, 0 : one-hot 2: intact 1:連續數值標準
@@ -283,12 +311,12 @@ if __name__ == '__main__':
   #  cols['lab_TOTAL'] = 2
     # cols['Bun_rslt'] = 2
     # cols['CRP_rslt'] = 2
-    # cols['Creatine_rslt'] = 2
-    # cols['Hb_rslt'] = 2
-    # cols['Hct_rslt'] = 2
+    cols['Creatine_rslt'] = 2
+    cols['Hb_rslt'] = 2
+    cols['Hct_rslt'] = 2
     # cols['Lactate_rslt'] = 2
-    # cols['RBC_rslt'] = 2
-    # cols['WBC_rslt'] = 2
+    cols['RBC_rslt'] = 2
+    cols['WBC_rslt'] = 2
     # cols['Procalcitonin_rslt'] = 2
  
     # make sure you get ccs right in CCS_distribution py
@@ -300,11 +328,11 @@ if __name__ == '__main__':
         cols[ccs_ids[i]] = 2
        
     # 過去兩年病史
-    # with open('/home/anpo/Desktop/pyscript/EDr_72/ccsh_distri.txt', 'r') as f:
-    #      ccs_ids = f.read().splitlines()
+    with open('/home/anpo/Desktop/pyscript/EDr_72/ccsh_distri.txt', 'r') as f:
+          ccs_ids = f.read().splitlines()
        
-    # for i in range(len(ccs_ids)):
-    #     cols[ccs_ids[i]] = 2    
+    for i in range(len(ccs_ids)):
+        cols[ccs_ids[i]] = 2    
         
     
     df_cat = df[cols.keys()]
@@ -409,22 +437,7 @@ if __name__ == '__main__':
        #undersample = CondensedNearestNeighbour(n_neighbors=1)
        #undersample = NearMiss(version=1,n_neighbors = 3)
        reX, rey = undersample.fit_resample(preprocessed_X, y72_.values)
-       # combined with bootstrap
-      
-       # # major class
-       # np.random.seed(0)
-       # major_idx = np.random.choice(cnt[0],50000,replace = True)
-       #  # minor class
-       # np.random.seed(1)
-       # minor_idx = np.random.choice(cnt[1],50000,replace = True)
-          
-       # X_major = reX[0:cnt[0],:] 
-       # X_minor = reX[cnt[0]:len(rey),:]
-       # y_major = rey[0:cnt[0]]
-       # y_minor = rey[cnt[0]:len(rey)]
        
-       # X_train_c = np.concatenate((X_major[major_idx,:], X_minor[minor_idx,:]), axis = 0)
-       # y_train_c = np.concatenate((y_major[major_idx], y_minor[minor_idx]))
        X_train_c = reX
        y_train_c = rey
     else:
@@ -432,8 +445,8 @@ if __name__ == '__main__':
        y_train_c = y72_.values 
     # ## 跑model  
     
-    clf = LogisticRegression(random_state=0, max_iter=2000)
-    #clf = RandomForestClassifier(random_state=0, class_weight='balanced')  ## 隨機森林
+    #clf = LogisticRegression(random_state=0, max_iter=2000)
+    clf = RandomForestClassifier(random_state=0)  ## 隨機森林
     #clf = XGBClassifier(use_label_encoder=False,eval_metric="error")
     #clf = MLPClassifier(random_state=1, max_iter=300)
         
