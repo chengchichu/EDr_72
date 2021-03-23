@@ -47,9 +47,8 @@ def pre_encode(data,tag,key):
 #       encoder = OrdinalEncoder()
 #       out = encoder.fit_transform(data)
        scaler = StandardScaler()
-       s_data = scaler.fit_transform(data) 
+       out = scaler.fit_transform(data) 
 #       out = np.squeeze(s_data)
-       out = s_data
        scale_param = [scaler.mean_, np.sqrt(scaler.var_)]
     elif tag == 0:   
        encoder = OneHotEncoder(sparse=False)
@@ -179,6 +178,7 @@ def model_xgb(clf,data_X,data_y):
         eval_set = [(xtrain,ytrain),(xtest,ytest)]
         
         model = clf.fit(xtrain, ytrain, early_stopping_rounds=5, eval_metric = "error", eval_set = eval_set)
+        #model = clf.fit(xtrain, ytrain, eval_metric = "error", eval_set = eval_set)
         results = model.evals_result()
         #print(results)            
         area_under_ROC = model_auc(model, xtest, ytest)
@@ -307,17 +307,23 @@ if __name__ == '__main__':
     cols['indate_month'] = 0
     cols['SBP'] = 1
     cols['DBP'] = 1
-  #  cols['exam_TOTAL'] = 2
-  #  cols['lab_TOTAL'] = 2
+    cols['exam_TOTAL'] = 2
+    cols['lab_TOTAL'] = 2
+    cols['ANISICMIGD'] = 2
+    cols['ANISICMIGD_1'] = 2
+    cols['ANISICMIGD_2'] = 2
+    cols['ANISICMIGD_3'] = 2
     # cols['Bun_rslt'] = 2
     # cols['CRP_rslt'] = 2
-    cols['Creatine_rslt'] = 2
-    cols['Hb_rslt'] = 2
-    cols['Hct_rslt'] = 2
     # cols['Lactate_rslt'] = 2
-    cols['RBC_rslt'] = 2
-    cols['WBC_rslt'] = 2
-    # cols['Procalcitonin_rslt'] = 2
+    # cols['Procalcitonin_rslt'] = 2    
+    
+    # cols['Creatine_rslt'] = 2
+    # cols['Hb_rslt'] = 2
+    # cols['Hct_rslt'] = 2
+    # cols['RBC_rslt'] = 2
+    # cols['WBC_rslt'] = 2
+
  
     # make sure you get ccs right in CCS_distribution py
     # index admission的主診斷
@@ -328,11 +334,11 @@ if __name__ == '__main__':
         cols[ccs_ids[i]] = 2
        
     # 過去兩年病史
-    with open('/home/anpo/Desktop/pyscript/EDr_72/ccsh_distri.txt', 'r') as f:
-          ccs_ids = f.read().splitlines()
+    # with open('/home/anpo/Desktop/pyscript/EDr_72/ccsh_distri.txt', 'r') as f:
+    #       ccs_ids = f.read().splitlines()
        
-    for i in range(len(ccs_ids)):
-        cols[ccs_ids[i]] = 2    
+    # for i in range(len(ccs_ids)):
+    #     cols[ccs_ids[i]] = 2    
         
     
     df_cat = df[cols.keys()]
@@ -446,13 +452,13 @@ if __name__ == '__main__':
     # ## 跑model  
     
     #clf = LogisticRegression(random_state=0, max_iter=2000)
-    clf = RandomForestClassifier(random_state=0)  ## 隨機森林
-    #clf = XGBClassifier(use_label_encoder=False,eval_metric="error")
-    #clf = MLPClassifier(random_state=1, max_iter=300)
+    #clf = RandomForestClassifier(random_state=0)  ## 隨機森林
+    clf = XGBClassifier(use_label_encoder=False,eval_metric="error")
+    #clf = MLPClassifier(random_state=1, max_iter=1000)
         
-    bst, models, kidx, aucs = ml_model(clf, X_train_c, y_train_c)
+    #bst, models, kidx, aucs = ml_model(clf, X_train_c, y_train_c)
     
-    #bst, models, kidx, aucs, eval_set = model_xgb(clf, X_train_c, y_train_c)
+    bst, models, kidx, aucs, eval_set = model_xgb(clf, X_train_c, y_train_c)
     
     
 
@@ -515,7 +521,7 @@ if __name__ == '__main__':
         cnt += 1
     
     
-    confusion_matrix(y_test, bst.predict(preprocessed_X_test))
+    print(confusion_matrix(y_test, bst.predict(preprocessed_X_test)))
     
     metrics.plot_roc_curve(bst, preprocessed_X_test, y_test) 
 
