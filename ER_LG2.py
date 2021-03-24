@@ -8,7 +8,7 @@ Created on Thu Dec 31 09:55:50 2020
 
 import pandas as pd
 from sklearn.linear_model import LogisticRegression
-from sklearn.preprocessing import OrdinalEncoder
+#from sklearn.preprocessing import OrdinalEncoder
 from sklearn.preprocessing import OneHotEncoder
 import numpy as np
 #from scipy.stats import norm
@@ -21,7 +21,8 @@ from collections import Counter
 from sklearn.metrics import average_precision_score
 from sklearn import metrics
 #from sklearn.svm import LinearSVC
-from sklearn.preprocessing import StandardScaler
+#from sklearn.preprocessing import StandardScaler
+from sklearn.preprocessing import RobustScaler
 from sklearn.metrics import confusion_matrix
 from sklearn.model_selection import train_test_split
 import seaborn as sn
@@ -37,43 +38,58 @@ from imblearn.under_sampling import OneSidedSelection
 import re
 from sklearn.neural_network import MLPClassifier
 from sklearn.impute import SimpleImputer
-from imblearn.under_sampling import CondensedNearestNeighbour
-from imblearn.under_sampling import NearMiss
+#from imblearn.under_sampling import CondensedNearestNeighbour
+#from imblearn.under_sampling import NearMiss
+fconvert = np.vectorize(float)
 
-def pre_encode(data,tag,key):
-    
+### Functions
+def pre_encode(data,tag):
+    data_copy = data.copy()  # prevent mutable      
     scale_param = []
-    if tag == 1: # ordinal encoding
-#       encoder = OrdinalEncoder()
-#       out = encoder.fit_transform(data)
-       scaler = StandardScaler()
-       out = scaler.fit_transform(data) 
-#       out = np.squeeze(s_data)
-       scale_param = [scaler.mean_, np.sqrt(scaler.var_)]
+    if tag == 1: # for continuous data
+       scaler = RobustScaler(with_centering = False)
+       # 考慮極端值
+       # 只取代缺失部份
+       data_copy = fconvert(data_copy) # widen the precision
+       not_miss = data_copy != -1 # leave -1 intact
+       s_data = scaler.fit_transform(data_copy[not_miss].reshape(-1,1))
+       idx = np.where(not_miss) 
+       data_copy[idx[0]] = s_data.copy()
+       #out = scaler.fit_transform(data) 
+       #scale_param = [scaler.mean_, np.sqrt(scaler.var_)]
+       scale_param = [scaler.scale_]
+       out = data_copy
     elif tag == 0:   
        encoder = OneHotEncoder(sparse=False)
-       out = encoder.fit_transform(data)
-    else:  
-       out = data 
-         
+       out = encoder.fit_transform(data_copy)
+    elif tag == 2:  
+       out = data_copy
+    else:
+       print('wrong code')        
     return out, scale_param
 
 def test_encode(data,tag,scale_param):
-    
+    data_copy = data.copy()  # prevent mutable      
     if tag == 1: # ordinal encoding
        # normalization
-       s_data = (data-scale_param[0])/scale_param[1]
-       out = s_data
-
+       data_copy = fconvert(data_copy) # widen the precision
+       not_miss = data_copy != -1 # leave -1 intact
+       data_true = data_copy[not_miss].reshape(-1,1)
+       s_data = data_true/scale_param[0]
+       #s_data = (data_true-scale_param[0]) / (scale_param[1]-scale_param[0])
+        #s_data = std * (scale_param[1]-scale_param[0]) + scale_param[0]
+       #print(s_data)
+       idx = np.where(not_miss) 
+       data_copy[idx[0]] = s_data.copy()
+       out = data_copy
     elif tag == 0:   
        encoder = OneHotEncoder(sparse=False)
-       out = encoder.fit_transform(data)
-    else:  
-       out = data 
-         
+       out = encoder.fit_transform(data_copy)
+    elif tag == 2:  
+       out = data_copy
+    else:
+       print('wrong code') 
     return out
-
-
 
 # 檢查是否有非數值的符號
 def assert_number(data, lab):
@@ -89,32 +105,30 @@ def assert_number(data, lab):
 
 # 改寫general
 def add_cut(data, lab, t):
-    
     tmp = data[lab]
     if len(t) == 1:
-       boolidx = tmp>=t[0]
-       data[lab] = boolidx.eq(True).mul(1)
+        boolidx = tmp>=t[0]
+        data[lab] = boolidx.eq(True).mul(1)
     elif len(t) == 2:
-       boolidx1 = tmp<=t[0] 
-       boolidx2 =(tmp>t[0]) & (tmp<=t[1]) 
-       boolidx3 = tmp>t[1]      
-       out = boolidx1.eq(True).mul(0)
-       out2 = boolidx2.eq(True).mul(1)
-       out3 = boolidx3.eq(True).mul(2)      
-       data[lab] = out | out2 | out3
+        boolidx1 = tmp<=t[0] 
+        boolidx2 =(tmp>t[0]) & (tmp<=t[1]) 
+        boolidx3 = tmp>t[1]      
+        out = boolidx1.eq(True).mul(0)
+        out2 = boolidx2.eq(True).mul(1)
+        out3 = boolidx3.eq(True).mul(2)      
+        data[lab] = out | out2 | out3
     elif len(t) == 3: 
-       boolidx1 = tmp<=t[0] 
-       boolidx2 =(tmp>t[0]) & (tmp<=t[1]) 
-       boolidx3 =(tmp>t[1]) & (tmp<=t[2])  
-       boolidx4 = tmp>t[2]
-       out = boolidx1.eq(True).mul(0)
-       out2 = boolidx2.eq(True).mul(1)
-       out3 = boolidx3.eq(True).mul(2) 
-       out4 = boolidx4.eq(True).mul(3) 
-       data[lab] = out | out2 | out3 | out4
+        boolidx1 = tmp<=t[0] 
+        boolidx2 =(tmp>t[0]) & (tmp<=t[1]) 
+        boolidx3 =(tmp>t[1]) & (tmp<=t[2])  
+        boolidx4 = tmp>t[2]
+        out = boolidx1.eq(True).mul(0)
+        out2 = boolidx2.eq(True).mul(1)
+        out3 = boolidx3.eq(True).mul(2) 
+        out4 = boolidx4.eq(True).mul(3) 
+        data[lab] = out | out2 | out3 | out4
     else:
-       print('converting error, out of n cat')
-    
+        print('converting error, out of n cat')
     return data  
 
 def model_auc(model, preprocessed_X, y_true):
@@ -139,18 +153,16 @@ def ml_model(clf,data_X,data_y):
         it_idx['train'] = train
         it_idx['test'] = test
         k_idx.append(it_idx)
-        
         # 只對xtrain做bootstrapping
         xtrain = data_X[data_size[train],:]
-        ytrain = data_y[data_size[train]]
-        
+        ytrain = data_y[data_size[train]]        
         xtrain, ytrain = bootstrap(xtrain, ytrain)
-        
+        xtest = data_X[data_size[test],:]
+        ytest = data_y[data_size[test]]
         model = clf.fit(xtrain, ytrain)
-        area_under_ROC = model_auc(model, data_X[data_size[test],:], data_y[data_size[test]])
+        area_under_ROC = model_auc(model, xtest, ytest)
         aucs.append(area_under_ROC[0])
-        models.append(model)
-        
+        models.append(model)        
     # selection model with best AUC
     bst = models[np.argmax(aucs)]
     return bst, models, k_idx, aucs
@@ -167,27 +179,22 @@ def model_xgb(clf,data_X,data_y):
         it_idx['train'] = train
         it_idx['test'] = test
         k_idx.append(it_idx)
-        
+        # 只對xtrain做bootstrapping
         xtrain = data_X[data_size[train],:]
-        ytrain = data_y[data_size[train]]
-        xtest = data_X[data_size[test],:]
-        ytest = data_y[data_size[test]]
-        
+        ytrain = data_y[data_size[train]]        
         xtrain, ytrain = bootstrap(xtrain, ytrain)
-                     
+        xtest = data_X[data_size[test],:]
+        ytest = data_y[data_size[test]]        
+        # xgb evaluation set
         eval_set = [(xtrain,ytrain),(xtest,ytest)]
-        
+        # xgb early stopping
         model = clf.fit(xtrain, ytrain, early_stopping_rounds=5, eval_metric = "error", eval_set = eval_set)
-        #model = clf.fit(xtrain, ytrain, eval_metric = "error", eval_set = eval_set)
-        results = model.evals_result()
-        #print(results)            
+        results = model.evals_result()    
         area_under_ROC = model_auc(model, xtest, ytest)
         aucs.append(area_under_ROC[0])
-        models.append(model)
-        
+        models.append(model)        
     # selection model with best AUC
     bst = models[np.argmax(aucs)]
-    print(aucs)
     return bst, models, k_idx, aucs, eval_set
 
 def bootstrap(datax,datay):    
@@ -210,23 +217,6 @@ def bootstrap(datax,datay):
     
     return datax_balanced, datay_balanced
     
-# def get_ICD_cat(data, icd_tag):
-# #    pmatch = re.compile(r'[A-Za-z]') # 是否英文字母
-#     for i in range(len(data)):   
-# #    for i in data.iterrows():
-#         icd_code = data.loc[i, icd_tag]
-# #        print(icd_code)
-#         matchobj = re.finditer(r'[A-Za-z]', icd_code)
-# #        print(len(list(matchobj)))
-#         if (len(list(matchobj)) < 3) : # NN 為缺失值, len = 2
-#            data.at[i, icd_tag] = icd_code[0]
-# #           for j in re.finditer(r'[A-Za-z]', icd_code):
-# ##               print(icd_code[j.start()])
-# ##               data.loc[i, icd_tag] = icd_code[j.start()]
-# #               data.at[i, icd_tag] = icd_code[j.start()]
-# #    print(m.start(), m.group())   
-#     return data
-
 def get_nan_pr(data,cols):
     pr = []
     for i in cols.keys():        
@@ -234,33 +224,16 @@ def get_nan_pr(data,cols):
         pr.append(sum(tmp)/len(df))  
     return pr  
 
-# def get_subset_index(data,cols):
-#     cnt = 0
-#     for i in cols.keys():
-#         tmp = (data[i].isnull()) | (data[i].isna())
-#         if (cnt == 0): 
-#             allnan = tmp
-#         else:    
-#             allnan = allnan | tmp
-#         cnt += 1
-#         index = ~allnan
-#     return index     
+
 # ####### where the code start 
 
 if __name__ == '__main__':
-
     #df = pd.read_excel('/Users/chengchichu/Desktop/EHR/ER_data_20210205_v3.xlsx',sheet_name = 'CGRDER_107108R18')
-
-    #df = pd.read_excel('/Users/chengchichu/Desktop/EHR/CGRDER_20210309_v4.xlsx', sheet_name = 'CGRDER_107108R20')   
-    
-    #df = pd.read_excel('/Users/chengchichu/Desktop/EHR/CGRDER_20210310_v5.xlsx', sheet_name = 'CGRDER_107108R22')   
-    
+    #df = pd.read_excel('/Users/chengchichu/Desktop/EHR/CGRDER_20210309_v4.xlsx', sheet_name = 'CGRDER_107108R20')      
+    #df = pd.read_excel('/Users/chengchichu/Desktop/EHR/CGRDER_20210310_v5.xlsx', sheet_name = 'CGRDER_107108R22')     
     #df = pd.read_excel('/home/anpo/Desktop/pyscript/EDr_72/CGRDER_20210310_v6.xlsx', sheet_name = 'CGRDER_20210310_V6')   
     #df = pd.read_excel('/home/anpo/Desktop/pyscript/EDr_72/CGRDER_20210312_v7.xlsx', sheet_name = 'CGRDER_107108R24')
     df = pd.read_csv('/home/anpo/Desktop/pyscript/EDr_72/CGRDER_20210317_v8.csv')
-#cols = ['LOC',	'SEX',	'DPT',	'DRNO',	'ANISICCLSF_C',	'INTY',	'ER_LOS'	, 'age1', 'week', 'weekday',	'indate_time_gr', 'ER_visit_30', 'ER_visit_365', 'TMP',	'PULSE', 'BPS',	'BPB',	'GCSE',	'GCSV',	'GCSM', 'BRTCNT','SPAO2']  
-# 先拿掉 醫師identity 年資深淺 跟 舒張壓 cutoff?
-## Data preprocessing and encoding, 0 : one-hot 2: intact 1:連續數值標準
 
     cols = {}
     #cols['LOC'] = 0 
@@ -275,13 +248,14 @@ if __name__ == '__main__':
     cols['indate_time_gr'] = 0
     cols['ER_visit_30'] = 2
     cols['ER_visit_365'] = 2
-    cols['TMP'] = 0	
-    cols['PULSE'] = 0
-    cols['BPS'] = 0
+    cols['TMP'] = 2
+    cols['PULSE'] = 1
+    cols['BPS'] = 1
+    cols['BPB'] = 1
     cols['GCSE'] = 2
     cols['GCSV'] = 2
     cols['GCSM'] = 2
-    cols['BRTCNT'] = 0
+    cols['BRTCNT'] = 2
     cols['SPAO2'] = 2
     cols['DD_visit_30'] = 2
     cols['ct'] = 2
@@ -313,18 +287,17 @@ if __name__ == '__main__':
     cols['ANISICMIGD_1'] = 2
     cols['ANISICMIGD_2'] = 2
     cols['ANISICMIGD_3'] = 2
-    # cols['Bun_rslt'] = 2
-    # cols['CRP_rslt'] = 2
-    # cols['Lactate_rslt'] = 2
-    # cols['Procalcitonin_rslt'] = 2    
+    cols['Bun_value'] = 1
+    cols['CRP_value'] = 1
+    cols['Lactate_value'] = 1
+    cols['Procalcitonin_value'] = 1    
     
-    # cols['Creatine_rslt'] = 2
-    # cols['Hb_rslt'] = 2
-    # cols['Hct_rslt'] = 2
-    # cols['RBC_rslt'] = 2
-    # cols['WBC_rslt'] = 2
+    cols['Creatine_value'] = 1
+    cols['Hb_value'] = 1
+    cols['Hct_value'] = 1
+    cols['RBC_value'] = 1
+    cols['WBC_value'] = 1
 
- 
     # make sure you get ccs right in CCS_distribution py
     # index admission的主診斷
     with open('/home/anpo/Desktop/pyscript/EDr_72/ccs_distri.txt', 'r') as f:
@@ -334,23 +307,30 @@ if __name__ == '__main__':
         cols[ccs_ids[i]] = 2
        
     # 過去兩年病史
-    # with open('/home/anpo/Desktop/pyscript/EDr_72/ccsh_distri.txt', 'r') as f:
-    #       ccs_ids = f.read().splitlines()
+    with open('/home/anpo/Desktop/pyscript/EDr_72/ccsh_distri.txt', 'r') as f:
+          ccs_ids = f.read().splitlines()
        
-    # for i in range(len(ccs_ids)):
-    #     cols[ccs_ids[i]] = 2    
+    for i in range(len(ccs_ids)):
+        cols[ccs_ids[i]] = 2    
         
-    
+    column_keys = cols.keys()
     df_cat = df[cols.keys()]
     y72 = df['re72'] 
     
     #=== 切分 train and test set
     X_train, X_test, y_train, y_test = train_test_split(df_cat, y72, test_size=0.3, random_state=40)
     
-    #X = X_train
-    
+    #了解哪些是缺失的 
     pr = get_nan_pr(X_train,cols)
-    
+    miss = [i>0 for i in pr]
+    miss_feature = []
+    cnt = 0
+    for i in column_keys:
+        if miss[cnt]:           
+           print(i) 
+           miss_feature.append(i)
+        cnt+=1
+        
     # whether use a subset to build the model, data without any missing value or do imputation   
     use_subset = False
     if (use_subset):
@@ -359,66 +339,60 @@ if __name__ == '__main__':
         y72 = y_train[nnnidx]
     
     else:
-       X = X_train      
-       y72 = y_train
+       X = X_train.copy()      
+       y72 = y_train.copy()
         
-        ## Data imputation
-        # 到院方式, 缺失當new category, 其他中位數避免 outlier, missing的多少？
-       #X = add_cat(X, 'INTY', 10)
-        #X = add_cat(X, 'ICD', 'NNN') #缺失的類別
-            
        # 新增類別不太適合, 缺失太少, train test split 類別不平均 
        X['INTY'].fillna(value=6, inplace=True)
-        
-       X = assert_number(X, 'ER_LOS'	)
-       X = assert_number(X, 'age1')
-       X = assert_number(X, 'Dr_VSy'	)
-       X = assert_number(X, 'WEIGHT'	)
-       X = assert_number(X, 'SBP'	)
-       X = assert_number(X, 'DBP'	)
-                 
-       fs_to_imp = ['ER_LOS','TMP','PULSE','BPS','BRTCNT','SPAO2','Dr_VSy','WEIGHT','SBP','DBP']
-        
-       imp = SimpleImputer(missing_values=np.nan, strategy='median')
-        
+       X_test['INTY'].fillna(value=6, inplace=True)
+       
+       # 連續類別確認
+       fs_to_imp = []       
+       for i,j in cols.items():
+           if (j == 1) and (i in miss_feature):
+              X = assert_number(X, i)
+              X_test = assert_number(X_test, i)
+              fs_to_imp.append(i)   
+       # imputation      
+       imp = SimpleImputer(missing_values=np.nan, strategy='constant', fill_value = -1)      
        imp.fit(X[fs_to_imp]) 
        impdata = imp.transform(X[fs_to_imp])
-        
+       impdata_test = imp.transform(X_test[fs_to_imp])          
        cnt = 0
        for i in fs_to_imp:
            print(i)
            X[i] = impdata[:,cnt]
+           X_test[i] = impdata_test[:,cnt]
            cnt+=1
-        
-        # vital sign 類別化
-       X = add_cut(X, 'TMP', [36, 37.5, 39]) # 體溫
-       X = add_cut(X, 'PULSE', [60, 100]) # 
-       X = add_cut(X, 'BPS', [90, 130]) # 收縮壓
-       X = add_cut(X, 'BRTCNT', [12, 20]) #
-       X = add_cut(X, 'SPAO2', [94]) #
-        
-        #抓 ICD code的第一個字母
-        #X = get_ICD_cat(X, 'ICD')
-    
-    # 
-    X_ = X
-    y72_ = y72
-    
+           
+    # 對某些variability 非常小的feature還是作類別化處理 例如體溫
+    X = add_cut(X, 'TMP', [37.5])
+    X = add_cut(X, 'SPAO2', [94])
+    X = add_cut(X, 'BRTCNT', [12, 20])
+    X_test = add_cut(X_test, 'TMP', [37.5])
+    X_test = add_cut(X_test, 'SPAO2', [94])
+    X_test = add_cut(X_test, 'BRTCNT', [12, 20])
+               
     # preprocessing encoding
     preprocessed_X = []
+    preprocessed_X_test = []
     encoding_head = []
     scale_params = {}
     cnt = 0
     mcnt0 = []
     for key, value in cols.items():
         print(key)
-        data_col = X_[key].values.reshape(-1,1)
-        out, scale_param = pre_encode(data_col, value, key)
-        scale_params[key] = scale_param
+        data_col = X[key].values.reshape(-1,1)
+        out, scale_param = pre_encode(data_col, value)
+        #scale_params[key] = scale_param
+        
+        data_col_test = X_test[key].values.reshape(-1,1)
+        out_test = test_encode(data_col_test, value, scale_param)
   
         # n-1 for dummy variable, this means reference group is the first column
         if out.shape[1]>1:
            out = out[:,1:(out.shape[1])]
+           out_test = out_test[:,1:(out_test.shape[1])]
            
         ec = [key for i in range(out.shape[1])]
         encoding_head.append(ec)
@@ -427,103 +401,50 @@ if __name__ == '__main__':
         #initialize
         if cnt == 0:
            preprocessed_X = out
+           preprocessed_X_test = out_test
         else:
-           preprocessed_X = np.concatenate((preprocessed_X, out), axis = 1) 
+           preprocessed_X = np.concatenate((preprocessed_X, out), axis = 1)
+           preprocessed_X_test = np.concatenate((preprocessed_X_test, out_test), axis = 1)
            
         cnt += 1
            
     encoding_head_flat = [j for i in encoding_head for j in i]   
         
-    
-    
     #======imbalanced 處理？
     unbalanced_corret = True
     if unbalanced_corret:
        undersample = OneSidedSelection(n_neighbors=1, n_seeds_S=10000)
        #undersample = CondensedNearestNeighbour(n_neighbors=1)
        #undersample = NearMiss(version=1,n_neighbors = 3)
-       reX, rey = undersample.fit_resample(preprocessed_X, y72_.values)
+       reX, rey = undersample.fit_resample(preprocessed_X, y72.values)
        
-       X_train_c = reX
-       y_train_c = rey
+       X_train_c = reX.copy()
+       y_train_c = rey.copy()
     else:
-       X_train_c = preprocessed_X
-       y_train_c = y72_.values 
-    # ## 跑model  
+       X_train_c = preprocessed_X.copy()
+       y_train_c = y72.values.copy()
     
-    #clf = LogisticRegression(random_state=0, max_iter=2000)
-    #clf = RandomForestClassifier(random_state=0)  ## 隨機森林
-    clf = XGBClassifier(use_label_encoder=False,eval_metric="error")
-    #clf = MLPClassifier(random_state=1, max_iter=1000)
-        
-    #bst, models, kidx, aucs = ml_model(clf, X_train_c, y_train_c)
+    # ## 跑model      
+    clf = LogisticRegression(random_state=0, max_iter=2000)
+    bst_lg, models, kidx, aucs_lg = ml_model(clf, X_train_c, y_train_c)
     
-    bst, models, kidx, aucs, eval_set = model_xgb(clf, X_train_c, y_train_c)
+    clf = RandomForestClassifier(random_state=0)  ## 隨機森林
+    bst_rf, models, kidx, aucs_rf = ml_model(clf, X_train_c, y_train_c)
     
+    clf = XGBClassifier(use_label_encoder=False, eval_metric="error")    
+    bst_xgb, models, kidx, aucs_xgb, eval_set = model_xgb(clf, X_train_c, y_train_c)
     
+    #     
+    print('conf matrix LG')
+    print(confusion_matrix(y_test, bst_lg.predict(preprocessed_X_test)))
+    print('conf matrix RF')
+    print(confusion_matrix(y_test, bst_rf.predict(preprocessed_X_test))) 
+    print('conf matrix XGB')
+    print(confusion_matrix(y_test, bst_xgb.predict(preprocessed_X_test)))
 
-    
-    
-    # test data processing
-    
-    X_test['INTY'].fillna(value=6, inplace=True)
-    X_test = assert_number(X_test, 'ER_LOS'	)
-    X_test = assert_number(X_test, 'age1')
-    X_test = assert_number(X_test, 'Dr_VSy'	)
-    X_test = assert_number(X_test, 'WEIGHT'	)
-    X_test = assert_number(X_test, 'SBP'	)
-    X_test = assert_number(X_test, 'DBP'	)
-         
-    
-    # fs_to_imp = ['ER_LOS','TMP','PULSE','BPS','BRTCNT','SPAO2','Dr_VSy','WEIGHT','SBP','DBP']
-        
-    # imp2 = SimpleImputer(missing_values=np.nan, strategy='median')
-        
-    # imp2.fit(X_test[fs_to_imp]) 
-
-    impdata = imp.transform(X_test[fs_to_imp])
-        
-    cnt = 0
-    for i in fs_to_imp:
-            print(i)
-            X_test[i] = impdata[:,cnt]
-            cnt+=1
-        
-        # vital sign 類別化
-    X_test = add_cut(X_test, 'TMP', [36, 37.5, 39]) # 體溫
-    X_test = add_cut(X_test, 'PULSE', [60, 100]) # 
-    X_test = add_cut(X_test, 'BPS', [90, 130]) # 收縮壓
-    X_test = add_cut(X_test, 'BRTCNT', [12, 20]) #
-    X_test = add_cut(X_test, 'SPAO2', [94]) #
-    
-       # preprocessing encoding
-    preprocessed_X_test = []
-    cnt = 0
-    mcnt = []
-    for key, value in cols.items():
-        print(key)
-        data_col = X_test[key].values.reshape(-1,1)
-        scale_param = scale_params[key]
-        out = test_encode(data_col, value, scale_param)
-
-        # n-1 for dummy variable, this means reference group is the first column
-        if out.shape[1]>1:
-           out = out[:,1:(out.shape[1])]
-
-        print(out.shape[1])
-        mcnt.append(out.shape[1])
-        #initialize
-        if cnt == 0:
-           preprocessed_X_test = out
-        else:
-           preprocessed_X_test = np.concatenate((preprocessed_X_test, out), axis = 1) 
-           
-        cnt += 1
-    
-    
-    print(confusion_matrix(y_test, bst.predict(preprocessed_X_test)))
-    
-    metrics.plot_roc_curve(bst, preprocessed_X_test, y_test) 
+    metrics.plot_roc_curve(bst_lg, preprocessed_X_test, y_test)
+    metrics.plot_roc_curve(bst_rf, preprocessed_X_test, y_test) 
+    metrics.plot_roc_curve(bst_xgb, preprocessed_X_test, y_test) 
 
 
 ## if model is LG
@@ -800,4 +721,21 @@ if __name__ == '__main__':
 #     if miss_idx.size>0:
 #        for i in range(len(miss_idx)):
 #            data.at[miss_idx[i],lab] = avg
+#     return data
+
+# def get_ICD_cat(data, icd_tag):
+# #    pmatch = re.compile(r'[A-Za-z]') # 是否英文字母
+#     for i in range(len(data)):   
+# #    for i in data.iterrows():
+#         icd_code = data.loc[i, icd_tag]
+# #        print(icd_code)
+#         matchobj = re.finditer(r'[A-Za-z]', icd_code)
+# #        print(len(list(matchobj)))
+#         if (len(list(matchobj)) < 3) : # NN 為缺失值, len = 2
+#            data.at[i, icd_tag] = icd_code[0]
+# #           for j in re.finditer(r'[A-Za-z]', icd_code):
+# ##               print(icd_code[j.start()])
+# ##               data.loc[i, icd_tag] = icd_code[j.start()]
+# #               data.at[i, icd_tag] = icd_code[j.start()]
+# #    print(m.start(), m.group())   
 #     return data
