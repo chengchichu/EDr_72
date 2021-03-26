@@ -41,6 +41,7 @@ from sklearn.impute import SimpleImputer
 #from imblearn.under_sampling import CondensedNearestNeighbour
 #from imblearn.under_sampling import NearMiss
 fconvert = np.vectorize(float)
+from sklearn.ensemble import VotingClassifier
 
 ### Functions
 def pre_encode(data,tag):
@@ -306,12 +307,12 @@ if __name__ == '__main__':
     for i in range(len(ccs_ids)):
         cols[ccs_ids[i]] = 2
        
-    # 過去兩年病史
-    with open('/home/anpo/Desktop/pyscript/EDr_72/ccsh_distri.txt', 'r') as f:
-          ccs_ids = f.read().splitlines()
+    # # 過去兩年病史
+    # with open('/home/anpo/Desktop/pyscript/EDr_72/ccsh_distri.txt', 'r') as f:
+    #       ccs_ids = f.read().splitlines()
        
-    for i in range(len(ccs_ids)):
-        cols[ccs_ids[i]] = 2    
+    # for i in range(len(ccs_ids)):
+    #     cols[ccs_ids[i]] = 2    
         
     column_keys = cols.keys()
     df_cat = df[cols.keys()]
@@ -425,14 +426,17 @@ if __name__ == '__main__':
        y_train_c = y72.values.copy()
     
     # ## 跑model      
-    clf = LogisticRegression(random_state=0, max_iter=2000)
-    bst_lg, models, kidx, aucs_lg = ml_model(clf, X_train_c, y_train_c)
+    clf1 = LogisticRegression(random_state=0, max_iter=2000)
+    bst_lg, models, kidx, aucs_lg = ml_model(clf1, X_train_c, y_train_c)
     
-    clf = RandomForestClassifier(random_state=0)  ## 隨機森林
-    bst_rf, models, kidx, aucs_rf = ml_model(clf, X_train_c, y_train_c)
+    clf2 = RandomForestClassifier(random_state=0)  ## 隨機森林
+    bst_rf, models, kidx, aucs_rf = ml_model(clf2, X_train_c, y_train_c)
     
-    clf = XGBClassifier(use_label_encoder=False, eval_metric="error")    
-    bst_xgb, models, kidx, aucs_xgb, eval_set = model_xgb(clf, X_train_c, y_train_c)
+    clf3 = XGBClassifier(use_label_encoder=False, eval_metric="error")    
+    bst_xgb, models, kidx, aucs_xgb, eval_set = model_xgb(clf3, X_train_c, y_train_c)
+                                                          
+    eclf1 = VotingClassifier(estimators=[('lg', clf1), ('rf', clf2), ('xgb', clf3)], voting='soft')
+    bst_eclf, models, kidx, aucs_eclf = ml_model(eclf1, X_train_c, y_train_c)
     
     #     
     print('conf matrix LG')
@@ -441,10 +445,13 @@ if __name__ == '__main__':
     print(confusion_matrix(y_test, bst_rf.predict(preprocessed_X_test))) 
     print('conf matrix XGB')
     print(confusion_matrix(y_test, bst_xgb.predict(preprocessed_X_test)))
+    print('conf matrix ensemble classifier')
+    print(confusion_matrix(y_test, bst_eclf.predict(preprocessed_X_test)))
 
     metrics.plot_roc_curve(bst_lg, preprocessed_X_test, y_test)
     metrics.plot_roc_curve(bst_rf, preprocessed_X_test, y_test) 
-    metrics.plot_roc_curve(bst_xgb, preprocessed_X_test, y_test) 
+    metrics.plot_roc_curve(bst_xgb, preprocessed_X_test, y_test)
+    metrics.plot_roc_curve(bst_eclf, preprocessed_X_test, y_test) 
 
 
 ## if model is LG
