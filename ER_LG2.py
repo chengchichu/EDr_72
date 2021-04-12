@@ -14,15 +14,16 @@ import numpy as np
 #from scipy.stats import norm
 #import statsmodels.api as sm
 from sklearn.metrics import roc_curve, auc
-#from sklearn.metrics import classification_report
+from sklearn.metrics import classification_report
 from numpy.random import randint
 from numpy.random import seed
 from collections import Counter
 from sklearn.metrics import average_precision_score
 from sklearn import metrics
-#from sklearn.svm import LinearSVC
-#from sklearn.preprocessing import StandardScaler
-from sklearn.preprocessing import RobustScaler
+from sklearn.svm import LinearSVC
+from sklearn.neural_network import MLPClassifier
+from sklearn.preprocessing import StandardScaler
+#from sklearn.preprocessing import RobustScaler
 from sklearn.metrics import confusion_matrix
 from sklearn.model_selection import train_test_split
 import seaborn as sn
@@ -48,18 +49,22 @@ def pre_encode(data,tag):
     data_copy = data.copy()  # prevent mutable      
     scale_param = []
     if tag == 1: # for continuous data
-       scaler = RobustScaler(with_centering = False)
-       # 考慮極端值
-       # 只取代缺失部份
+       # scaler = RobustScaler(with_centering = False)
+       # # # 考慮極端值
+       # # 只取代缺失部份
        data_copy = fconvert(data_copy) # widen the precision
-       not_miss = data_copy != -1 # leave -1 intact
-       s_data = scaler.fit_transform(data_copy[not_miss].reshape(-1,1))
-       idx = np.where(not_miss) 
-       data_copy[idx[0]] = s_data.copy()
-       #out = scaler.fit_transform(data) 
-       #scale_param = [scaler.mean_, np.sqrt(scaler.var_)]
-       scale_param = [scaler.scale_]
-       out = data_copy
+       # not_miss = data_copy != -1 # leave -1 intact
+       # s_data = scaler.fit_transform(data_copy[not_miss].reshape(-1,1))
+       # idx = np.where(not_miss) 
+       # data_copy[idx[0]] = s_data.copy()
+       
+       # standardize
+       scaler = StandardScaler()
+       s_data = scaler.fit_transform(data_copy.reshape(-1,1))
+       
+       scale_param = [scaler.mean_, np.sqrt(scaler.var_)]
+       #scale_param = [scaler.scale_]
+       out = s_data
     elif tag == 0:   
        encoder = OneHotEncoder(sparse=False)
        out = encoder.fit_transform(data_copy)
@@ -74,15 +79,17 @@ def test_encode(data,tag,scale_param):
     if tag == 1: # ordinal encoding
        # normalization
        data_copy = fconvert(data_copy) # widen the precision
-       not_miss = data_copy != -1 # leave -1 intact
-       data_true = data_copy[not_miss].reshape(-1,1)
-       s_data = data_true/scale_param[0]
+       #not_miss = data_copy != -1 # leave -1 intact
+       #data_true = data_copy[not_miss].reshape(-1,1)
+       #s_data = data_true/scale_param[0]
        #s_data = (data_true-scale_param[0]) / (scale_param[1]-scale_param[0])
         #s_data = std * (scale_param[1]-scale_param[0]) + scale_param[0]
+        
+       s_data = (data_copy-scale_param[0])/scale_param[1]
        #print(s_data)
-       idx = np.where(not_miss) 
-       data_copy[idx[0]] = s_data.copy()
-       out = data_copy
+       # idx = np.where(not_miss) 
+       # data_copy[idx[0]] = s_data.copy()
+       out = s_data
     elif tag == 0:   
        encoder = OneHotEncoder(sparse=False)
        out = encoder.fit_transform(data_copy)
@@ -225,6 +232,10 @@ def get_nan_pr(data,cols):
         pr.append(sum(tmp)/len(df))  
     return pr  
 
+def model_result(y_test, bst, modelname, X_test):
+    print('conf matrix '+modelname)
+    print(confusion_matrix(y_test, bst.predict(X_test)))
+    print(classification_report(y_test, bst.predict(X_test), target_names=['沒回診','有回診']))
 
 # ####### where the code start 
 
@@ -234,12 +245,15 @@ if __name__ == '__main__':
     #df = pd.read_excel('/Users/chengchichu/Desktop/EHR/CGRDER_20210310_v5.xlsx', sheet_name = 'CGRDER_107108R22')     
     #df = pd.read_excel('/home/anpo/Desktop/pyscript/EDr_72/CGRDER_20210310_v6.xlsx', sheet_name = 'CGRDER_20210310_V6')   
     #df = pd.read_excel('/home/anpo/Desktop/pyscript/EDr_72/CGRDER_20210312_v7.xlsx', sheet_name = 'CGRDER_107108R24')
-    df = pd.read_csv('/home/anpo/Desktop/pyscript/EDr_72/CGRDER_20210317_v8.csv')
+    df = pd.read_csv('/home/anpo/Desktop/pyscript/EDr_72/CGRDER_20210409_v9.csv', encoding= 'unicode_escape')
+    
+    df2 = pd.read_csv('/home/anpo/Desktop/pyscript/EDr_72/er72_processed_DATA_v8_ccs_converted.csv')
 
     cols = {}
-    #cols['LOC'] = 0 
+    cols['DPT2'] = 0
+    # cols['drID'] = 2
     cols['SEX'] = 0 
-    #cols['DPT'] = 0
+    #cols['DPT2'] = 0
     cols['ANISICCLSF_C'] = 2
     cols['INTY'] = 0
     cols['ER_LOS'] = 1
@@ -247,17 +261,17 @@ if __name__ == '__main__':
     cols['week'] = 0
     cols['weekday'] = 2
     cols['indate_time_gr'] = 0
-    cols['ER_visit_30'] = 2
-    cols['ER_visit_365'] = 2
-    cols['TMP'] = 2
+    cols['ER_visit_30'] = 1 # 
+    cols['ER_visit_365'] = 1
+    cols['TMP'] = 1
     cols['PULSE'] = 1
     cols['BPS'] = 1
     cols['BPB'] = 1
     cols['GCSE'] = 2
     cols['GCSV'] = 2
     cols['GCSM'] = 2
-    cols['BRTCNT'] = 2
-    cols['SPAO2'] = 2
+    cols['BRTCNT'] = 1
+    cols['SPAO2'] = 1
     cols['DD_visit_30'] = 2
     cols['ct'] = 2
     cols['MRI'] = 2
@@ -299,27 +313,52 @@ if __name__ == '__main__':
     cols['RBC_value'] = 1
     cols['WBC_value'] = 1
 
-    # make sure you get ccs right in CCS_distribution py
+    # # make sure you get ccs right in CCS_distribution py
     # index admission的主診斷
     with open('/home/anpo/Desktop/pyscript/EDr_72/ccs_distri.txt', 'r') as f:
-         ccs_ids = f.read().splitlines()
+          ccs_ids = f.read().splitlines()
        
     for i in range(len(ccs_ids)):
         cols[ccs_ids[i]] = 2
        
     # # 過去兩年病史
-    # with open('/home/anpo/Desktop/pyscript/EDr_72/ccsh_distri.txt', 'r') as f:
-    #       ccs_ids = f.read().splitlines()
+    with open('/home/anpo/Desktop/pyscript/EDr_72/ccsh_distri.txt', 'r') as f:
+          ccs_ids = f.read().splitlines()
        
-    # for i in range(len(ccs_ids)):
-    #     cols[ccs_ids[i]] = 2    
+    for i in range(len(ccs_ids)):
+        cols[ccs_ids[i]] = 2    
         
     column_keys = cols.keys()
     df_cat = df[cols.keys()]
     y72 = df['re72'] 
     
+    # 院區切分
+    # 台北院區的話
+    # df_3 = df_cat[df['DPT2']==1]
+    # y72_3 = y72[df['DPT2']==1]
+    # df_3 = df_cat[df2['ccs']=='dx239']
+    # y72_3 = y72[df2['ccs']=='dx239']
+    df_3 = df_cat
+    y72_3 = y72
+    
+    
+    # 對類別變項檢查, 如果只有一個sample移除, 無法平均的分給train and test    
+    cat_cols = ['SEX','ANISICCLSF_C','INTY','week','weekday','indate_time_gr']   
+    # row_idx = []
+    row_idx = np.empty(0).astype(int)    
+    for i in cat_cols:
+        table = df_3[i].value_counts()
+        for j,k in table.items():
+            if k <= 5:
+               #row_idx.append(df_3[df_3[i].values == j].index.values)
+               row_idx = np.concatenate((row_idx,df_3[df_3[i].values == j].index.values),axis = 0)
+    df_3 = df_3.drop(row_idx)       
+    y72_3 = y72_3.drop(row_idx)       
+               
     #=== 切分 train and test set
-    X_train, X_test, y_train, y_test = train_test_split(df_cat, y72, test_size=0.3, random_state=40)
+    # 思考在imputation前如何正確stratify 
+    #X_train, X_test, y_train, y_test = train_test_split(df_3, y72_3, test_size=0.3, random_state=40, stratify = df_3['INTY'])
+    X_train, X_test, y_train, y_test = train_test_split(df_3, y72_3, test_size=0.3, random_state=40)
     
     #了解哪些是缺失的 
     pr = get_nan_pr(X_train,cols)
@@ -355,7 +394,8 @@ if __name__ == '__main__':
               X_test = assert_number(X_test, i)
               fs_to_imp.append(i)   
        # imputation      
-       imp = SimpleImputer(missing_values=np.nan, strategy='constant', fill_value = -1)      
+       #imp = SimpleImputer(missing_values=np.nan, strategy='constant', fill_value = -1)    
+       imp = SimpleImputer(missing_values=np.nan, strategy='median')   
        imp.fit(X[fs_to_imp]) 
        impdata = imp.transform(X[fs_to_imp])
        impdata_test = imp.transform(X_test[fs_to_imp])          
@@ -366,13 +406,13 @@ if __name__ == '__main__':
            X_test[i] = impdata_test[:,cnt]
            cnt+=1
            
-    # 對某些variability 非常小的feature還是作類別化處理 例如體溫
-    X = add_cut(X, 'TMP', [37.5])
-    X = add_cut(X, 'SPAO2', [94])
-    X = add_cut(X, 'BRTCNT', [12, 20])
-    X_test = add_cut(X_test, 'TMP', [37.5])
-    X_test = add_cut(X_test, 'SPAO2', [94])
-    X_test = add_cut(X_test, 'BRTCNT', [12, 20])
+    # # 對某些variability 非常小的feature還是作類別化處理 例如體溫
+    # X = add_cut(X, 'TMP', [37.5])
+    # X = add_cut(X, 'SPAO2', [94])
+    # X = add_cut(X, 'BRTCNT', [12, 20])
+    # X_test = add_cut(X_test, 'TMP', [37.5])
+    # X_test = add_cut(X_test, 'SPAO2', [94])
+    # X_test = add_cut(X_test, 'BRTCNT', [12, 20])
                
     # preprocessing encoding
     preprocessed_X = []
@@ -425,33 +465,74 @@ if __name__ == '__main__':
        X_train_c = preprocessed_X.copy()
        y_train_c = y72.values.copy()
     
-    # ## 跑model      
-    clf1 = LogisticRegression(random_state=0, max_iter=2000)
+    ## 跑model      
+    clf1 = LogisticRegression(random_state=0, max_iter=3000)
     bst_lg, models, kidx, aucs_lg = ml_model(clf1, X_train_c, y_train_c)
     
     clf2 = RandomForestClassifier(random_state=0)  ## 隨機森林
     bst_rf, models, kidx, aucs_rf = ml_model(clf2, X_train_c, y_train_c)
     
+    # clf3 = XGBClassifier(use_label_encoder=False, eval_metric="error")    
+    # bst_xgb, models, kidx, aucs_xgb, eval_set = model_xgb(clf3, X_train_c, y_train_c)
+    
     clf3 = XGBClassifier(use_label_encoder=False, eval_metric="error")    
-    bst_xgb, models, kidx, aucs_xgb, eval_set = model_xgb(clf3, X_train_c, y_train_c)
+    bst_xgb, models, kidx, aucs_xgb = ml_model(clf3, X_train_c, y_train_c)
+    
+    # clf4 = MLPClassifier(random_state=1, max_iter=3000)   
+    # bst_mlp, models, kidx, aucs_mlp = ml_model(clf4, X_train_c, y_train_c)
+    
+    # clf5 = LinearSVC(random_state=0, tol=1e-5)
+    # bst_svc, models, kidx, aucs_svc = ml_model(clf5, X_train_c, y_train_c)
                                                           
-    eclf1 = VotingClassifier(estimators=[('lg', clf1), ('rf', clf2), ('xgb', clf3)], voting='soft')
+    eclf1 = VotingClassifier(estimators=[('lg', clf1), ('rf', clf2), ('xgb', clf3)], voting='soft', weights = [2.5,5,2.5])
     bst_eclf, models, kidx, aucs_eclf = ml_model(eclf1, X_train_c, y_train_c)
     
     #     
-    print('conf matrix LG')
-    print(confusion_matrix(y_test, bst_lg.predict(preprocessed_X_test)))
-    print('conf matrix RF')
-    print(confusion_matrix(y_test, bst_rf.predict(preprocessed_X_test))) 
-    print('conf matrix XGB')
-    print(confusion_matrix(y_test, bst_xgb.predict(preprocessed_X_test)))
-    print('conf matrix ensemble classifier')
-    print(confusion_matrix(y_test, bst_eclf.predict(preprocessed_X_test)))
+    # print('conf matrix LG')
+    # print(confusion_matrix(y_test, bst_lg.predict(preprocessed_X_test)))
+    # print(classification_report(y_test, bst_lg.predict(preprocessed_X_test), target_names=['沒回診','有回診']))
+    model_result(y_test, bst_lg, 'LG', preprocessed_X_test)
+    model_result(y_test, bst_rf, 'RF', preprocessed_X_test)
+    model_result(y_test, bst_xgb, 'XGB', preprocessed_X_test)
+    model_result(y_test, bst_eclf, 'ECLF', preprocessed_X_test)
 
     metrics.plot_roc_curve(bst_lg, preprocessed_X_test, y_test)
     metrics.plot_roc_curve(bst_rf, preprocessed_X_test, y_test) 
     metrics.plot_roc_curve(bst_xgb, preprocessed_X_test, y_test)
+    # metrics.plot_roc_curve(bst_mlp, preprocessed_X_test, y_test) 
+    # metrics.plot_roc_curve(bst_svc, preprocessed_X_test, y_test)
+    
+    
     metrics.plot_roc_curve(bst_eclf, preprocessed_X_test, y_test) 
+   
+    # # finding the best weight for voting classifier
+    # weights_comb = [[3,3.5,3.5],[5,2.5,2.5],[7,1.5,1.5],[9,0.5,0.5]]
+    # for i in weights_comb:        
+    #     eclf1 = VotingClassifier(estimators=[('lg', clf1), ('rf', clf2), ('xgb', clf3)], voting='soft', weights = i)
+    #     bst_eclf, models, kidx, aucs_eclf = ml_model(eclf1, X_train_c, y_train_c)
+    #     mean_auc = np.mean(aucs_eclf)
+    #     print(mean_auc)
+    #     print(confusion_matrix(y_test, bst_eclf.predict(preprocessed_X_test)))
+    #     fpr, tpr, thresholds = metrics.roc_curve(y_test, bst_eclf.predict_proba(preprocessed_X_test)[:,1])
+    #     print(metrics.auc(fpr, tpr))
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 ## if model is LG
