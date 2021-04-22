@@ -43,6 +43,7 @@ from sklearn.impute import SimpleImputer
 #from imblearn.under_sampling import NearMiss
 fconvert = np.vectorize(float)
 from sklearn.ensemble import VotingClassifier
+from tabulate import tabulate
 
 ### Functions
 def pre_encode(data,tag):
@@ -233,10 +234,20 @@ def get_nan_pr(data,cols):
     return pr  
 
 def model_result(y_test, bst, modelname, X_test):
-    print('conf matrix '+modelname)
-    print(confusion_matrix(y_test, bst.predict(X_test)))
-    print(classification_report(y_test, bst.predict(X_test), target_names=['沒回診','有回診']))
+    # print('conf matrix '+modelname)
+    cm = confusion_matrix(y_test, bst.predict(X_test))
+    # print(cm)
+    cp = classification_report(y_test, bst.predict(X_test), target_names=['沒回診','有回診'])
+    # print(cp)
+    return cm, cp
 
+def table_r(cp,cm,auc):
+    lines = cp.splitlines()
+    c=[np.array(lines[2].split()[1:4]), np.array(lines[3].split()[1:4])]
+    out = np.concatenate((cm,c),axis=1)
+    cc = np.array([auc, np.nan])
+    out = np.concatenate((out,cc.reshape(2,-1)),axis=1)
+    print(tabulate(out, headers=['p0', 'p1','precision','recall','f1','AUC']))
 # ####### where the code start 
 
 if __name__ == '__main__':
@@ -245,9 +256,9 @@ if __name__ == '__main__':
     #df = pd.read_excel('/Users/chengchichu/Desktop/EHR/CGRDER_20210310_v5.xlsx', sheet_name = 'CGRDER_107108R22')     
     #df = pd.read_excel('/home/anpo/Desktop/pyscript/EDr_72/CGRDER_20210310_v6.xlsx', sheet_name = 'CGRDER_20210310_V6')   
     #df = pd.read_excel('/home/anpo/Desktop/pyscript/EDr_72/CGRDER_20210312_v7.xlsx', sheet_name = 'CGRDER_107108R24')
-    df = pd.read_csv('/home/anpo/Desktop/pyscript/EDr_72/CGRDER_20210409_v9.csv', encoding= 'unicode_escape')
+    df = pd.read_csv('/home/anpo/Desktop/pyscript/EDr_72/CGRDER_20210413_v10.csv', encoding = 'unicode_escape')
     
-    df2 = pd.read_csv('/home/anpo/Desktop/pyscript/EDr_72/er72_processed_DATA_v8_ccs_converted.csv')
+    df2 = pd.read_csv('/home/anpo/Desktop/pyscript/EDr_72/er72_processed_DATA_v10_ccs_converted.csv')
 
     cols = {}
     cols['DPT2'] = 0
@@ -272,7 +283,7 @@ if __name__ == '__main__':
     cols['GCSM'] = 2
     cols['BRTCNT'] = 1
     cols['SPAO2'] = 1
-    cols['DD_visit_30'] = 2
+    cols['DD_visit_30'] = 1
     cols['ct'] = 2
     cols['MRI'] = 2
     cols['xray'] = 2
@@ -289,15 +300,15 @@ if __name__ == '__main__':
     #cols['Procalcitonin_lab'] = 2
     #cols['Lactate_lab'] = 2
     #cols['ICD'] = 0  #cols['ICD3'] = 0
-    cols['DD_visit_365'] = 2
+    cols['DD_visit_365'] = 1
     cols['Dr_VSy'] = 1
     cols['WEIGHT'] = 1
     #cols['HEIGHT'] = 2
     cols['indate_month'] = 0
     cols['SBP'] = 1
     cols['DBP'] = 1
-    cols['exam_TOTAL'] = 2
-    cols['lab_TOTAL'] = 2
+    cols['exam_TOTAL'] = 1
+    cols['lab_TOTAL'] = 1
     cols['ANISICMIGD'] = 2
     cols['ANISICMIGD_1'] = 2
     cols['ANISICMIGD_2'] = 2
@@ -328,6 +339,14 @@ if __name__ == '__main__':
     for i in range(len(ccs_ids)):
         cols[ccs_ids[i]] = 2    
         
+    # # 用藥
+    with open('/home/anpo/Desktop/pyscript/EDr_72/atc_distri.txt', 'r') as f:
+          atc_ids = f.read().splitlines()
+       
+    for i in range(len(atc_ids)):
+        cols[atc_ids[i]] = 2        
+        
+        
     column_keys = cols.keys()
     df_cat = df[cols.keys()]
     y72 = df['re72'] 
@@ -336,10 +355,12 @@ if __name__ == '__main__':
     # 台北院區的話
     # df_3 = df_cat[df['DPT2']==1]
     # y72_3 = y72[df['DPT2']==1]
-    # df_3 = df_cat[df2['ccs']=='dx239']
-    # y72_3 = y72[df2['ccs']=='dx239']
+
     df_3 = df_cat
     y72_3 = y72
+    
+    # df_3 = df_cat.iloc[df2['newID'][df2['ccs']=='dx82'].values,:]
+    # y72_3 = y72.iloc[df2['newID'][df2['ccs']=='dx82'].values]
     
     
     # 對類別變項檢查, 如果只有一個sample移除, 無法平均的分給train and test    
@@ -467,54 +488,62 @@ if __name__ == '__main__':
     
     ## 跑model      
     clf1 = LogisticRegression(random_state=0, max_iter=3000)
-    bst_lg, models, kidx, aucs_lg = ml_model(clf1, X_train_c, y_train_c)
+    # bst_lg, models, kidx, aucs_lg = ml_model(clf1, X_train_c, y_train_c)
     
     clf2 = RandomForestClassifier(random_state=0)  ## 隨機森林
-    bst_rf, models, kidx, aucs_rf = ml_model(clf2, X_train_c, y_train_c)
+    # bst_rf, models, kidx, aucs_rf = ml_model(clf2, X_train_c, y_train_c)
     
-    # clf3 = XGBClassifier(use_label_encoder=False, eval_metric="error")    
-    # bst_xgb, models, kidx, aucs_xgb, eval_set = model_xgb(clf3, X_train_c, y_train_c)
+    # # clf3 = XGBClassifier(use_label_encoder=False, eval_metric="error")    
+    # # bst_xgb, models, kidx, aucs_xgb, eval_set = model_xgb(clf3, X_train_c, y_train_c)
     
     clf3 = XGBClassifier(use_label_encoder=False, eval_metric="error")    
-    bst_xgb, models, kidx, aucs_xgb = ml_model(clf3, X_train_c, y_train_c)
+    # bst_xgb, models, kidx, aucs_xgb = ml_model(clf3, X_train_c, y_train_c)
+
+    # eclf1 = VotingClassifier(estimators=[('lg', clf1), ('rf', clf2), ('xgb', clf3)], voting='soft', weights = [2.5,5,2.5])
+    # bst_eclf, models, kidx, aucs_eclf = ml_model(eclf1, X_train_c, y_train_c)
     
-    # clf4 = MLPClassifier(random_state=1, max_iter=3000)   
-    # bst_mlp, models, kidx, aucs_mlp = ml_model(clf4, X_train_c, y_train_c)
-    
-    # clf5 = LinearSVC(random_state=0, tol=1e-5)
-    # bst_svc, models, kidx, aucs_svc = ml_model(clf5, X_train_c, y_train_c)
-                                                          
-    eclf1 = VotingClassifier(estimators=[('lg', clf1), ('rf', clf2), ('xgb', clf3)], voting='soft', weights = [2.5,5,2.5])
-    bst_eclf, models, kidx, aucs_eclf = ml_model(eclf1, X_train_c, y_train_c)
-    
-    #     
-    # print('conf matrix LG')
-    # print(confusion_matrix(y_test, bst_lg.predict(preprocessed_X_test)))
-    # print(classification_report(y_test, bst_lg.predict(preprocessed_X_test), target_names=['沒回診','有回診']))
-    model_result(y_test, bst_lg, 'LG', preprocessed_X_test)
-    model_result(y_test, bst_rf, 'RF', preprocessed_X_test)
-    model_result(y_test, bst_xgb, 'XGB', preprocessed_X_test)
-    model_result(y_test, bst_eclf, 'ECLF', preprocessed_X_test)
+    cm_lg, cp_lg = model_result(y_test, bst_lg, 'LG', preprocessed_X_test)
+    cm_rf, cp_rf = model_result(y_test, bst_rf, 'RF', preprocessed_X_test)
+    cm_xg, cp_xg = model_result(y_test, bst_xgb, 'XGB', preprocessed_X_test)
+    cm_ec, cp_ec = model_result(y_test, bst_eclf, 'ECLF', preprocessed_X_test)
 
     metrics.plot_roc_curve(bst_lg, preprocessed_X_test, y_test)
     metrics.plot_roc_curve(bst_rf, preprocessed_X_test, y_test) 
-    metrics.plot_roc_curve(bst_xgb, preprocessed_X_test, y_test)
-    # metrics.plot_roc_curve(bst_mlp, preprocessed_X_test, y_test) 
-    # metrics.plot_roc_curve(bst_svc, preprocessed_X_test, y_test)
-    
-    
+    metrics.plot_roc_curve(bst_xgb, preprocessed_X_test, y_test) 
     metrics.plot_roc_curve(bst_eclf, preprocessed_X_test, y_test) 
    
+    lg_auc, lgprc = model_auc(bst_lg, preprocessed_X_test, y_test)
+    rf_auc, rfprc = model_auc(bst_rf, preprocessed_X_test, y_test)
+    xgb_auc, xgbprc = model_auc(bst_xgb, preprocessed_X_test, y_test)
+    ec_auc, ecprc = model_auc(bst_eclf, preprocessed_X_test, y_test)
+    
+    print('LG')
+    table_r(cp_lg,cm_lg,lg_auc)
+    print('RF')
+    table_r(cp_rf,cm_rf,rf_auc)
+    print('XGB')
+    table_r(cp_xg,cm_xg,xgb_auc)
+    print('EC')
+    table_r(cp_ec,cm_ec,ec_auc)
+    
+    
+    
     # # finding the best weight for voting classifier
     # weights_comb = [[3,3.5,3.5],[5,2.5,2.5],[7,1.5,1.5],[9,0.5,0.5]]
+    # weights_comb = [[3.5,3,3.5],[2.5,5,2.5],[1.5,7,1.5],[0.5,9,0.5]]
+    # weights_comb = [[3.5,3.5,3],[2.5,2.5,5],[1.5,1.5,7],[0.5,0.5,9]]
     # for i in weights_comb:        
     #     eclf1 = VotingClassifier(estimators=[('lg', clf1), ('rf', clf2), ('xgb', clf3)], voting='soft', weights = i)
     #     bst_eclf, models, kidx, aucs_eclf = ml_model(eclf1, X_train_c, y_train_c)
-    #     mean_auc = np.mean(aucs_eclf)
-    #     print(mean_auc)
-    #     print(confusion_matrix(y_test, bst_eclf.predict(preprocessed_X_test)))
-    #     fpr, tpr, thresholds = metrics.roc_curve(y_test, bst_eclf.predict_proba(preprocessed_X_test)[:,1])
-    #     print(metrics.auc(fpr, tpr))
+    #     cm_ec, cp_ec = model_result(y_test, bst_eclf, 'ec', preprocessed_X_test)
+    #     ec_auc, ecprc = model_auc(bst_eclf, preprocessed_X_test, y_test)
+    #     print('wlg-%.2f wrf-%.2f wxgb-%.2f'  % (i[0], i[1], i[2]))
+    #     table_r(cp_ec,cm_ec,ec_auc)
+        # mean_auc = np.mean(aucs_eclf)
+        # print(mean_auc)
+        # print(confusion_matrix(y_test, bst_eclf.predict(preprocessed_X_test)))
+        # fpr, tpr, thresholds = metrics.roc_curve(y_test, bst_eclf.predict_proba(preprocessed_X_test)[:,1])
+        # print(metrics.auc(fpr, tpr))
 
 
 
