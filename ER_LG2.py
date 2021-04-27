@@ -244,11 +244,146 @@ def table_r(cp,cm,auc):
     cc = np.array([auc, np.nan])
     out = np.concatenate((out,cc.reshape(2,-1)),axis=1)
     print(tabulate(out, headers=['p0', 'p1','precision','recall','f1','AUC']))
+    
+def preprocess(X_train, y_train, X_test, y_test, cols):  
+    
+    X = X_train.copy()      
+    y72 = y_train.copy()
+     
+    # 新增類別不太適合, 缺失太少, train test split 類別不平均 
+    X['INTY'].fillna(value=6, inplace=True)
+    X_test['INTY'].fillna(value=6, inplace=True)
+    
+    # 連續類別確認為數字
+    fs_to_imp = []       
+    for i,j in cols.items():
+        if (j == 1) and (i in miss_feature):
+           X = assert_number(X, i)
+           X_test = assert_number(X_test, i)
+           fs_to_imp.append(i)   
+           
+    # imputation
+    md_strategy = True
+    if md_strategy:    
+       imp = SimpleImputer(missing_values=np.nan, strategy='median')   
+    else: 
+       imp = SimpleImputer(missing_values=np.nan, strategy='constant', fill_value = -1)  
+    imp.fit(X[fs_to_imp]) 
+    impdata = imp.transform(X[fs_to_imp])
+    impdata_test = imp.transform(X_test[fs_to_imp])          
+    cnt = 0
+    for i in fs_to_imp:
+        print(i)
+        X[i] = impdata[:,cnt]
+        X_test[i] = impdata_test[:,cnt]
+        cnt+=1
+            
+    # preprocessing encoding
+    preprocessed_X = []
+    preprocessed_X_test = []
+    encoding_head = []
+    scale_params = {}
+    cnt = 0 # initial
+    mcnt0 = []
+    for key, value in cols.items():
+
+        #print(key)
+
+        data_col = X[key].values.reshape(-1,1)
+        out, scale_param = pre_encode(data_col, value, md_strategy)
+        
+        data_col_test = X_test[key].values.reshape(-1,1)
+        out_test = test_encode(data_col_test, value, scale_param, md_strategy)
+  
+        # n-1 for dummy variable, this means reference group is the first column
+        if out.shape[1]>1:
+           out = out[:,1:(out.shape[1])]
+           out_test = out_test[:,1:(out_test.shape[1])]
+           
+        ec = [key for i in range(out.shape[1])]
+        encoding_head.append(ec)
+        #print(out.shape[1])   
+        mcnt0.append(out.shape[1])
+        #initialize
+        if cnt == 0:
+           preprocessed_X = out
+           preprocessed_X_test = out_test
+        else:
+           preprocessed_X = np.concatenate((preprocessed_X, out), axis = 1)
+           preprocessed_X_test = np.concatenate((preprocessed_X_test, out_test), axis = 1)
+           
+        cnt += 1
+           
+    encoding_head_flat = [j for i in encoding_head for j in i]      
+    
+    return preprocessed_X, y72, preprocessed_X_test, encoding_head_flat
+    
+def run_models(X_train_c, y_train_c, preprocessed_X_test, y_test, model_strat):
+        ## 跑model      
+    clf1 = LogisticRegression(random_state=0, max_iter=3000)
+    bst_lg, models, kidx, aucs_lg = ml_model(clf1, X_train_c, y_train_c)
+    
+    clf2 = RandomForestClassifier(random_state=0)  ## 隨機森林
+    bst_rf, models, kidx, aucs_rf = ml_model(clf2, X_train_c, y_train_c)
+    
+     # # clf3 = XGBClassifier(use_label_encoder=False, eval_metric="error")    
+     # # bst_xgb, models, kidx, aucs_xgb, eval_set = model_xgb(clf3, X_train_c, y_train_c)
+    
+    clf3 = XGBClassifier(use_label_encoder=False, eval_metric="error")    
+    bst_xgb, models, kidx, aucs_xgb = ml_model(clf3, X_train_c, y_train_c)
+
+    eclf1 = VotingClassifier(estimators=[('lg', clf1), ('rf', clf2), ('xgb', clf3)], voting='soft', weights = [2.5,5,2.5])
+    bst_eclf, models, kidx, aucs_eclf = ml_model(eclf1, X_train_c, y_train_c)
+    
+    cm_lg, cp_lg = model_result(y_test, bst_lg, 'LG', preprocessed_X_test)
+    cm_rf, cp_rf = model_result(y_test, bst_rf, 'RF', preprocessed_X_test)
+    cm_xg, cp_xg = model_result(y_test, bst_xgb, 'XGB', preprocessed_X_test)
+    cm_ec, cp_ec = model_result(y_test, bst_eclf, 'ECLF', preprocessed_X_test)
+
+    metrics.plot_roc_curve(bst_lg, preprocessed_X_test, y_test)
+    metrics.plot_roc_curve(bst_rf, preprocessed_X_test, y_test) 
+    metrics.plot_roc_curve(bst_xgb, preprocessed_X_test, y_test) 
+    metrics.plot_roc_curve(bst_eclf, preprocessed_X_test, y_test) 
+   
+    lg_auc, lgprc = model_auc(bst_lg, preprocessed_X_test, y_test)
+    rf_auc, rfprc = model_auc(bst_rf, preprocessed_X_test, y_test)
+    xgb_auc, xgbprc = model_auc(bst_xgb, preprocessed_X_test, y_test)
+    ec_auc, ecprc = model_auc(bst_eclf, preprocessed_X_test, y_test)
+    
+    #if not model_strat:
+    print(model_strat)
+    print('LG')
+    table_r(cp_lg,cm_lg,lg_auc)
+    print('RF')
+    table_r(cp_rf,cm_rf,rf_auc)
+    print('XGB')
+    table_r(cp_xg,cm_xg,xgb_auc)
+    print('EC')
+    table_r(cp_ec,cm_ec,ec_auc)
+    
+    # # finding the best weight for voting classifier
+    # weights_comb = [[3,3.5,3.5],[5,2.5,2.5],[7,1.5,1.5],[9,0.5,0.5]]
+    # weights_comb = [[3.5,3,3.5],[2.5,5,2.5],[1.5,7,1.5],[0.5,9,0.5]]
+    # weights_comb = [[3.5,3.5,3],[2.5,2.5,5],[1.5,1.5,7],[0.5,0.5,9]]
+    # for i in weights_comb:        
+    #     eclf1 = VotingClassifier(estimators=[('lg', clf1), ('rf', clf2), ('xgb', clf3)], voting='soft', weights = i)
+    #     bst_eclf, models, kidx, aucs_eclf = ml_model(eclf1, X_train_c, y_train_c)
+    #     cm_ec, cp_ec = model_result(y_test, bst_eclf, 'ec', preprocessed_X_test)
+    #     ec_auc, ecprc = model_auc(bst_eclf, preprocessed_X_test, y_test)
+    #     print('wlg-%.2f wrf-%.2f wxgb-%.2f'  % (i[0], i[1], i[2]))
+    #     table_r(cp_ec,cm_ec,ec_auc)
+        # mean_auc = np.mean(aucs_eclf)
+        # print(mean_auc)
+        # print(confusion_matrix(y_test, bst_eclf.predict(preprocessed_X_test)))
+        # fpr, tpr, thresholds = metrics.roc_curve(y_test, bst_eclf.predict_proba(preprocessed_X_test)[:,1])
+        # print(metrics.auc(fpr, tpr))
+
 # ####### where the code start 
 
 if __name__ == '__main__':
 
-    df = pd.read_csv('/home/anpo/Desktop/pyscript/EDr_72/CGRDER_20210422_v11.csv', encoding = 'big5')
+    data_root_folder = '/Users/chengchichu/Desktop/py/EDr_72/'
+    df = pd.read_csv(data_root_folder+'CGRDER_20210422_v11.csv', encoding = 'big5')
     
     #df2 = pd.read_csv('/home/anpo/Desktop/pyscript/EDr_72/er72_processed_DATA_v10_ccs_converted.csv')
 
@@ -312,22 +447,23 @@ if __name__ == '__main__':
     cols['RBC_value'] = 1
     cols['WBC_value'] = 1
     cols['中分類'] = 2
+    cols['大分類'] = 2
 
     # # make sure you get ccs right in CCS_distribution py
     # index admission的主診斷
-    with open('/home/anpo/Desktop/pyscript/EDr_72/ccs_distri.txt', 'r') as f:
+    with open(data_root_folder+'ccs_distri.txt', 'r') as f:
          ccs_ids = f.read().splitlines()       
          for i in range(len(ccs_ids)):
              cols[ccs_ids[i]] = 2
        
     # # 過去兩年病史
-    with open('/home/anpo/Desktop/pyscript/EDr_72/ccsh_distri.txt', 'r') as f:
+    with open(data_root_folder+'ccsh_distri.txt', 'r') as f:
          ccsh_ids = f.read().splitlines()       
          for i in range(len(ccsh_ids)):
              cols[ccsh_ids[i]] = 2    
         
     # # 用藥
-    with open('/home/anpo/Desktop/pyscript/EDr_72/atc_distri.txt', 'r') as f:
+    with open(data_root_folder+'atc_distri.txt', 'r') as f:
          atc_ids = f.read().splitlines()       
          for i in range(len(atc_ids)):
              cols[atc_ids[i]] = 2        
@@ -340,15 +476,7 @@ if __name__ == '__main__':
     # 台北院區的話
     # df_3 = df_cat[df['DPT2']==1]
     # y72_3 = y72[df['DPT2']==1]
-
-    model_strat = 1 
-    strat_params = {}
-    strat_params['中分類'] = '腹痛'
-
-    df_3 = df_cat[df_cat['中分類']=='腹痛']
-    y72_3 = y72[df_cat['中分類']=='腹痛']
-        
-        
+                
     # df_3 = df_cat.iloc[df2['newID'][df2['ccs']=='dx82'].values,:]
     # y72_3 = y72.iloc[df2['newID'][df2['ccs']=='dx82'].values]
         
@@ -356,175 +484,66 @@ if __name__ == '__main__':
     cat_cols = ['SEX','ANISICCLSF_C','INTY','week','weekday','indate_time_gr']   
     row_idx = np.empty(0).astype(int)    
     for i in cat_cols:
-        table = df_3[i].value_counts()
+        table = df_cat[i].value_counts()
         for j,k in table.items():
             if k <= 5:
                #row_idx.append(df_3[df_3[i].values == j].index.values)
-               row_idx = np.concatenate((row_idx,df_3[df_3[i].values == j].index.values),axis = 0)
-    df_3 = df_3.drop(row_idx)       
-    y72_3 = y72_3.drop(row_idx)       
+               row_idx = np.concatenate((row_idx,df_cat[df_cat[i].values == j].index.values),axis = 0)
+    df_cat = df_cat.drop(row_idx)       
+    y72 = y72.drop(row_idx)       
                
-    #=== 切分 train and test set
-    # 思考在imputation前如何正確stratify 
-    #X_train, X_test, y_train, y_test = train_test_split(df_3, y72_3, test_size=0.3, random_state=40, stratify = df_3['INTY'])
-    X_train, X_test, y_train, y_test = train_test_split(df_3, y72_3, test_size=0.3, random_state=40)
     
-    #了解哪些是缺失的 
-    pr = get_nan_pr(X_train,cols)
-    miss = [i>0 for i in pr]
-    miss_feature = []
-    cnt = 0
-    for i in column_keys:
-        if miss[cnt]:           
-           print(i) 
-           miss_feature.append(i)
-        cnt+=1
-        
-    #   
-    X = X_train.copy()      
-    y72 = y_train.copy()
-     
-    # 新增類別不太適合, 缺失太少, train test split 類別不平均 
-    X['INTY'].fillna(value=6, inplace=True)
-    X_test['INTY'].fillna(value=6, inplace=True)
-    
-    # 連續類別確認為數字
-    fs_to_imp = []       
-    for i,j in cols.items():
-        if (j == 1) and (i in miss_feature):
-           X = assert_number(X, i)
-           X_test = assert_number(X_test, i)
-           fs_to_imp.append(i)   
-           
-    # imputation
-    md_strategy = True
-    if md_strategy:    
-       imp = SimpleImputer(missing_values=np.nan, strategy='median')   
-    else: 
-       imp = SimpleImputer(missing_values=np.nan, strategy='constant', fill_value = -1)  
-    imp.fit(X[fs_to_imp]) 
-    impdata = imp.transform(X[fs_to_imp])
-    impdata_test = imp.transform(X_test[fs_to_imp])          
-    cnt = 0
-    for i in fs_to_imp:
-        print(i)
-        X[i] = impdata[:,cnt]
-        X_test[i] = impdata_test[:,cnt]
-        cnt+=1
-    
-    # remove col 
-    if model_strat:
-       del df_3[] 
-        
-    # preprocessing encoding
-    preprocessed_X = []
-    preprocessed_X_test = []
-    encoding_head = []
-    scale_params = {}
-    cnt = 0 # initial
-    mcnt0 = []
-    for key, value in cols.items():
+    # 切分subpopulation to build model
+    strat_params = {}
+    strat_params['大分類'] = '腸胃系統'
+    strat_params['中分類'] = '腹痛'
+    sub_model = True
+    # 刪掉用來分類的類別
+    keys_to_remove = ['大分類', '中分類']
+    for key in keys_to_remove:
+        cols.pop(key)
 
+    for key, val in strat_params.items():
         print(key)
-
-        data_col = X[key].values.reshape(-1,1)
-        out, scale_param = pre_encode(data_col, value, md_strategy)
+        df_3 = df_cat[df_cat[key] == val]
+        y72_3 = y72[df_cat[key] == val]
+        #=== 切分 train and test set
+        # 思考在imputation前如何正確stratify 
+        #X_train, X_test, y_train, y_test = train_test_split(df_3, y72_3, test_size=0.3, random_state=40, stratify = df_3['INTY'])
+        X_train, X_test, y_train, y_test = train_test_split(df_3, y72_3, test_size=0.3, random_state=40)
+    
+        #了解哪些是缺失的 
+        pr = get_nan_pr(X_train,cols)
+        miss = [i>0 for i in pr]
+        miss_feature = []
+        cnt = 0
+        for i in column_keys:
+            if miss[cnt]:           
+               print(i) 
+               miss_feature.append(i)
+            cnt+=1
         
-        data_col_test = X_test[key].values.reshape(-1,1)
-        out_test = test_encode(data_col_test, value, scale_param, md_strategy)
-  
-        # n-1 for dummy variable, this means reference group is the first column
-        if out.shape[1]>1:
-           out = out[:,1:(out.shape[1])]
-           out_test = out_test[:,1:(out_test.shape[1])]
+        #   
+        preprocessed_X, ytrain, preprocessed_X_test, encoding_head_flat = preprocess(X_train, y_train, X_test, y_test, cols) 
+    
+        #======imbalanced 處理？
+        unbalanced_corret = True
+        if unbalanced_corret:
+           n_seeds_num=10000     
+           if sub_model:
+              n_seeds_num=1000               
+           undersample = OneSidedSelection(n_neighbors=1, n_seeds_S=n_seeds_num)
+           #undersample = CondensedNearestNeighbour(n_neighbors=1)
+           #undersample = NearMiss(version=1,n_neighbors = 3)
+           reX, rey = undersample.fit_resample(preprocessed_X, ytrain.values)
            
-        ec = [key for i in range(out.shape[1])]
-        encoding_head.append(ec)
-        print(out.shape[1])   
-        mcnt0.append(out.shape[1])
-        #initialize
-        if cnt == 0:
-           preprocessed_X = out
-           preprocessed_X_test = out_test
+           X_train_c = reX.copy()
+           y_train_c = rey.copy()
         else:
-           preprocessed_X = np.concatenate((preprocessed_X, out), axis = 1)
-           preprocessed_X_test = np.concatenate((preprocessed_X_test, out_test), axis = 1)
-           
-        cnt += 1
-           
-    encoding_head_flat = [j for i in encoding_head for j in i]       
-    
-    #======imbalanced 處理？
-    unbalanced_corret = True
-    if unbalanced_corret:
-       undersample = OneSidedSelection(n_neighbors=1, n_seeds_S=10000)
-       #undersample = CondensedNearestNeighbour(n_neighbors=1)
-       #undersample = NearMiss(version=1,n_neighbors = 3)
-       reX, rey = undersample.fit_resample(preprocessed_X, y72.values)
-       
-       X_train_c = reX.copy()
-       y_train_c = rey.copy()
-    else:
-       X_train_c = preprocessed_X.copy()
-       y_train_c = y72.values.copy()
-    
-    ## 跑model      
-    # clf1 = LogisticRegression(random_state=0, max_iter=3000)
-    # bst_lg, models, kidx, aucs_lg = ml_model(clf1, X_train_c, y_train_c)
-    
-    # clf2 = RandomForestClassifier(random_state=0)  ## 隨機森林
-    # bst_rf, models, kidx, aucs_rf = ml_model(clf2, X_train_c, y_train_c)
-    
-    # # # clf3 = XGBClassifier(use_label_encoder=False, eval_metric="error")    
-    # # # bst_xgb, models, kidx, aucs_xgb, eval_set = model_xgb(clf3, X_train_c, y_train_c)
-    
-    # clf3 = XGBClassifier(use_label_encoder=False, eval_metric="error")    
-    # bst_xgb, models, kidx, aucs_xgb = ml_model(clf3, X_train_c, y_train_c)
-
-    # eclf1 = VotingClassifier(estimators=[('lg', clf1), ('rf', clf2), ('xgb', clf3)], voting='soft', weights = [2.5,5,2.5])
-    # bst_eclf, models, kidx, aucs_eclf = ml_model(eclf1, X_train_c, y_train_c)
-    
-    # cm_lg, cp_lg = model_result(y_test, bst_lg, 'LG', preprocessed_X_test)
-    # cm_rf, cp_rf = model_result(y_test, bst_rf, 'RF', preprocessed_X_test)
-    # cm_xg, cp_xg = model_result(y_test, bst_xgb, 'XGB', preprocessed_X_test)
-    # cm_ec, cp_ec = model_result(y_test, bst_eclf, 'ECLF', preprocessed_X_test)
-
-    # metrics.plot_roc_curve(bst_lg, preprocessed_X_test, y_test)
-    # metrics.plot_roc_curve(bst_rf, preprocessed_X_test, y_test) 
-    # metrics.plot_roc_curve(bst_xgb, preprocessed_X_test, y_test) 
-    # metrics.plot_roc_curve(bst_eclf, preprocessed_X_test, y_test) 
-   
-    # lg_auc, lgprc = model_auc(bst_lg, preprocessed_X_test, y_test)
-    # rf_auc, rfprc = model_auc(bst_rf, preprocessed_X_test, y_test)
-    # xgb_auc, xgbprc = model_auc(bst_xgb, preprocessed_X_test, y_test)
-    # ec_auc, ecprc = model_auc(bst_eclf, preprocessed_X_test, y_test)
-    
-    # print('LG')
-    # table_r(cp_lg,cm_lg,lg_auc)
-    # print('RF')
-    # table_r(cp_rf,cm_rf,rf_auc)
-    # print('XGB')
-    # table_r(cp_xg,cm_xg,xgb_auc)
-    # print('EC')
-    # table_r(cp_ec,cm_ec,ec_auc)
-    
+           X_train_c = preprocessed_X.copy()
+           y_train_c = ytrain.values.copy()
         
-    # # finding the best weight for voting classifier
-    # weights_comb = [[3,3.5,3.5],[5,2.5,2.5],[7,1.5,1.5],[9,0.5,0.5]]
-    # weights_comb = [[3.5,3,3.5],[2.5,5,2.5],[1.5,7,1.5],[0.5,9,0.5]]
-    # weights_comb = [[3.5,3.5,3],[2.5,2.5,5],[1.5,1.5,7],[0.5,0.5,9]]
-    # for i in weights_comb:        
-    #     eclf1 = VotingClassifier(estimators=[('lg', clf1), ('rf', clf2), ('xgb', clf3)], voting='soft', weights = i)
-    #     bst_eclf, models, kidx, aucs_eclf = ml_model(eclf1, X_train_c, y_train_c)
-    #     cm_ec, cp_ec = model_result(y_test, bst_eclf, 'ec', preprocessed_X_test)
-    #     ec_auc, ecprc = model_auc(bst_eclf, preprocessed_X_test, y_test)
-    #     print('wlg-%.2f wrf-%.2f wxgb-%.2f'  % (i[0], i[1], i[2]))
-    #     table_r(cp_ec,cm_ec,ec_auc)
-        # mean_auc = np.mean(aucs_eclf)
-        # print(mean_auc)
-        # print(confusion_matrix(y_test, bst_eclf.predict(preprocessed_X_test)))
-        # fpr, tpr, thresholds = metrics.roc_curve(y_test, bst_eclf.predict_proba(preprocessed_X_test)[:,1])
-        # print(metrics.auc(fpr, tpr))
+        run_models(X_train_c, y_train_c, preprocessed_X_test, y_test, key)
 
     # # save data for autoML
     # import pickle
