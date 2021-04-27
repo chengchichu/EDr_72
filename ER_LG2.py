@@ -17,7 +17,8 @@ from sklearn.metrics import roc_curve, auc, classification_report, average_preci
 from numpy.random import randint, seed
 from collections import Counter
 from sklearn import metrics
-from sklearn.svm import LinearSVC
+#from sklearn.svm import LinearSVC
+from sklearn.svm import SVC
 from sklearn.neural_network import MLPClassifier
 from sklearn.preprocessing import StandardScaler, RobustScaler
 from sklearn.model_selection import train_test_split, KFold
@@ -273,7 +274,7 @@ def preprocess(X_train, y_train, X_test, y_test, cols):
     impdata_test = imp.transform(X_test[fs_to_imp])          
     cnt = 0
     for i in fs_to_imp:
-        print(i)
+        #print(i)
         X[i] = impdata[:,cnt]
         X_test[i] = impdata_test[:,cnt]
         cnt+=1
@@ -332,22 +333,27 @@ def run_models(X_train_c, y_train_c, preprocessed_X_test, y_test, model_strat):
     clf3 = XGBClassifier(use_label_encoder=False, eval_metric="error")    
     bst_xgb, models, kidx, aucs_xgb = ml_model(clf3, X_train_c, y_train_c)
 
+    clf4 = SVC(gamma='auto', random_state=0)   
+    bst_svm, models, kidx, aucs_svm = ml_model(clf4, X_train_c, y_train_c)
+
     eclf1 = VotingClassifier(estimators=[('lg', clf1), ('rf', clf2), ('xgb', clf3)], voting='soft', weights = [2.5,5,2.5])
     bst_eclf, models, kidx, aucs_eclf = ml_model(eclf1, X_train_c, y_train_c)
     
     cm_lg, cp_lg = model_result(y_test, bst_lg, 'LG', preprocessed_X_test)
     cm_rf, cp_rf = model_result(y_test, bst_rf, 'RF', preprocessed_X_test)
     cm_xg, cp_xg = model_result(y_test, bst_xgb, 'XGB', preprocessed_X_test)
+    cm_sv, cp_sv = model_result(y_test, bst_svm, 'SVM', preprocessed_X_test)
     cm_ec, cp_ec = model_result(y_test, bst_eclf, 'ECLF', preprocessed_X_test)
 
-    metrics.plot_roc_curve(bst_lg, preprocessed_X_test, y_test)
-    metrics.plot_roc_curve(bst_rf, preprocessed_X_test, y_test) 
-    metrics.plot_roc_curve(bst_xgb, preprocessed_X_test, y_test) 
-    metrics.plot_roc_curve(bst_eclf, preprocessed_X_test, y_test) 
+   # metrics.plot_roc_curve(bst_lg, preprocessed_X_test, y_test)
+   # metrics.plot_roc_curve(bst_rf, preprocessed_X_test, y_test) 
+   # metrics.plot_roc_curve(bst_xgb, preprocessed_X_test, y_test) 
+   # metrics.plot_roc_curve(bst_eclf, preprocessed_X_test, y_test) 
    
     lg_auc, lgprc = model_auc(bst_lg, preprocessed_X_test, y_test)
     rf_auc, rfprc = model_auc(bst_rf, preprocessed_X_test, y_test)
     xgb_auc, xgbprc = model_auc(bst_xgb, preprocessed_X_test, y_test)
+    svm_auc, svmprc = model_auc(bst_svm, preprocessed_X_test, y_test)
     ec_auc, ecprc = model_auc(bst_eclf, preprocessed_X_test, y_test)
     
     #if not model_strat:
@@ -358,6 +364,8 @@ def run_models(X_train_c, y_train_c, preprocessed_X_test, y_test, model_strat):
     table_r(cp_rf,cm_rf,rf_auc)
     print('XGB')
     table_r(cp_xg,cm_xg,xgb_auc)
+    print('SVM')
+    table_r(cp_svm,cm_svm,svm_auc)
     print('EC')
     table_r(cp_ec,cm_ec,ec_auc)
     
@@ -446,8 +454,9 @@ if __name__ == '__main__':
     cols['Hct_value'] = 1
     cols['RBC_value'] = 1
     cols['WBC_value'] = 1
-    cols['中分類'] = 2
-    cols['大分類'] = 2
+    #cols['中分類'] = 2
+    #cols['大分類'] = 2
+    cols['判別依據'] = 2
 
     # # make sure you get ccs right in CCS_distribution py
     # index admission的主診斷
@@ -495,18 +504,33 @@ if __name__ == '__main__':
     
     # 切分subpopulation to build model
     strat_params = {}
-    strat_params['大分類'] = '腸胃系統'
-    strat_params['中分類'] = '腹痛'
+    #strat_params['全'] = ''
+    strat_params['判別依據'] = '檢傷判別條件為主訴=>腹痛,急性中樞中度疼痛(4-7)'
+    strat_params['判別依據'] = '檢傷判別條件為主訴=>眩暈/頭暈,姿勢性，無其他神經學症狀'
+    strat_params['判別依據'] = '檢傷判別條件為主訴=>胸痛/胸悶,急性中樞中度疼痛(4-7)'
+    strat_params['判別依據'] = '檢傷判別條件為主訴=>發燒/畏寒,發燒(看起來有病容)'                                           
+    strat_params['判別依據'] = '檢傷判別條件為主訴=>腰痛,急性中樞中度疼痛(4-7)'
+    strat_params['判別依據'] = '檢傷判別條件為主訴=>頭痛,急性中樞中度疼痛(4-7)'
+    strat_params['判別依據'] = '檢傷判別條件為主訴=>噁心/嘔吐,急性持續性嘔吐'
+    strat_params['判別依據'] = '檢傷判別條件為主訴=>眼睛疼痛,急性中樞中度疼痛(4-7)'
+    strat_params['判別依據'] = '檢傷判別條件為主訴=>背痛,急性中樞中度疼痛(4-7)'
+    strat_params['判別依據'] = '檢傷判別條件為主訴=>腹瀉,輕度脫水'
+
+    #strat_params['中分類'] = '腹痛'
     sub_model = True
     # 刪掉用來分類的類別
-    keys_to_remove = ['大分類', '中分類']
+    keys_to_remove = ['判別依據']
     for key in keys_to_remove:
         cols.pop(key)
 
     for key, val in strat_params.items():
-        print(key)
-        df_3 = df_cat[df_cat[key] == val]
-        y72_3 = y72[df_cat[key] == val]
+        print(val)
+        if sub_model:
+           df_3 = df_cat[df_cat[key] == val]
+           y72_3 = y72[df_cat[key] == val]
+        else:    
+           df_3 = df_cat
+           y72_3 = y72
         #=== 切分 train and test set
         # 思考在imputation前如何正確stratify 
         #X_train, X_test, y_train, y_test = train_test_split(df_3, y72_3, test_size=0.3, random_state=40, stratify = df_3['INTY'])
@@ -515,16 +539,18 @@ if __name__ == '__main__':
         #了解哪些是缺失的 
         pr = get_nan_pr(X_train,cols)
         miss = [i>0 for i in pr]
-        miss_feature = []
+        col_to_drop = []
         cnt = 0
-        for i in column_keys:
-            if miss[cnt]:           
-               print(i) 
-               miss_feature.append(i)
+        for i in column_keys:           
+               #print(i) 
+            if pr[cnt]>0.3: # 缺失>30%
+               col_to_drop.append(i)
             cnt+=1
-        
+        # 移除缺失太多的feature
+        X_train_ = X_train.drop(col_to_drop,axis = 1)
+        X_test_ = X_train.drop(col_to_drop,axis = 1)
         #   
-        preprocessed_X, ytrain, preprocessed_X_test, encoding_head_flat = preprocess(X_train, y_train, X_test, y_test, cols) 
+        preprocessed_X, ytrain, preprocessed_X_test, encoding_head_flat = preprocess(X_train_, y_train, X_test_, y_test, cols) 
     
         #======imbalanced 處理？
         unbalanced_corret = True
