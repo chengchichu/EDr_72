@@ -246,7 +246,7 @@ def table_r(cp,cm,auc):
     out = np.concatenate((out,cc.reshape(2,-1)),axis=1)
     print(tabulate(out, headers=['p0', 'p1','precision','recall','f1','AUC']))
     
-def preprocess(X_train, y_train, X_test, y_test, cols):  
+def preprocess(X_train, y_train, X_test, cols, miss_feature):  
     
     X = X_train.copy()      
     y72 = y_train.copy()
@@ -365,7 +365,7 @@ def run_models(X_train_c, y_train_c, preprocessed_X_test, y_test, model_strat):
     print('XGB')
     table_r(cp_xg,cm_xg,xgb_auc)
     print('SVM')
-    table_r(cp_svm,cm_svm,svm_auc)
+    table_r(cp_sv,cm_sv,svm_auc)
     print('EC')
     table_r(cp_ec,cm_ec,ec_auc)
     
@@ -390,7 +390,7 @@ def run_models(X_train_c, y_train_c, preprocessed_X_test, y_test, model_strat):
 
 if __name__ == '__main__':
 
-    data_root_folder = '/Users/chengchichu/Desktop/py/EDr_72/'
+    data_root_folder = '/home/anpo/Desktop/pyscript/EDr_72/'
     df = pd.read_csv(data_root_folder+'CGRDER_20210422_v11.csv', encoding = 'big5')
     
     #df2 = pd.read_csv('/home/anpo/Desktop/pyscript/EDr_72/er72_processed_DATA_v10_ccs_converted.csv')
@@ -505,16 +505,16 @@ if __name__ == '__main__':
     # 切分subpopulation to build model
     strat_params = {}
     #strat_params['全'] = ''
-    strat_params['判別依據'] = '檢傷判別條件為主訴=>腹痛,急性中樞中度疼痛(4-7)'
-    strat_params['判別依據'] = '檢傷判別條件為主訴=>眩暈/頭暈,姿勢性，無其他神經學症狀'
-    strat_params['判別依據'] = '檢傷判別條件為主訴=>胸痛/胸悶,急性中樞中度疼痛(4-7)'
-    strat_params['判別依據'] = '檢傷判別條件為主訴=>發燒/畏寒,發燒(看起來有病容)'                                           
-    strat_params['判別依據'] = '檢傷判別條件為主訴=>腰痛,急性中樞中度疼痛(4-7)'
-    strat_params['判別依據'] = '檢傷判別條件為主訴=>頭痛,急性中樞中度疼痛(4-7)'
-    strat_params['判別依據'] = '檢傷判別條件為主訴=>噁心/嘔吐,急性持續性嘔吐'
-    strat_params['判別依據'] = '檢傷判別條件為主訴=>眼睛疼痛,急性中樞中度疼痛(4-7)'
-    strat_params['判別依據'] = '檢傷判別條件為主訴=>背痛,急性中樞中度疼痛(4-7)'
-    strat_params['判別依據'] = '檢傷判別條件為主訴=>腹瀉,輕度脫水'
+    strat_params['判別依據1'] = '檢傷判別條件為主訴=>腹痛,急性中樞中度疼痛(4-7)'
+    strat_params['判別依據2'] = '檢傷判別條件為主訴=>眩暈/頭暈,姿勢性，無其他神經學症狀'
+    strat_params['判別依據3'] = '檢傷判別條件為主訴=>胸痛/胸悶,急性中樞中度疼痛(4-7)'
+    strat_params['判別依據4'] = '檢傷判別條件為主訴=>發燒/畏寒,發燒(看起來有病容)'                                           
+    strat_params['判別依據5'] = '檢傷判別條件為主訴=>腰痛,急性中樞中度疼痛(4-7)'
+    strat_params['判別依據6'] = '檢傷判別條件為主訴=>頭痛,急性中樞中度疼痛(4-7)'
+    strat_params['判別依據7'] = '檢傷判別條件為主訴=>噁心/嘔吐,急性持續性嘔吐'
+    strat_params['判別依據8'] = '檢傷判別條件為主訴=>眼睛疼痛,急性中樞中度疼痛(4-7)'
+    strat_params['判別依據9'] = '檢傷判別條件為主訴=>背痛,急性中樞中度疼痛(4-7)'
+    strat_params['判別依據10'] = '檢傷判別條件為主訴=>腹瀉,輕度脫水'
 
     #strat_params['中分類'] = '腹痛'
     sub_model = True
@@ -526,31 +526,37 @@ if __name__ == '__main__':
     for key, val in strat_params.items():
         print(val)
         if sub_model:
-           df_3 = df_cat[df_cat[key] == val]
-           y72_3 = y72[df_cat[key] == val]
+           df_3 = df_cat[df_cat[key[:4]] == val]
+           y72_3 = y72[df_cat[key[:4]] == val]
         else:    
            df_3 = df_cat
            y72_3 = y72
         #=== 切分 train and test set
         # 思考在imputation前如何正確stratify 
-        #X_train, X_test, y_train, y_test = train_test_split(df_3, y72_3, test_size=0.3, random_state=40, stratify = df_3['INTY'])
-        X_train, X_test, y_train, y_test = train_test_split(df_3, y72_3, test_size=0.3, random_state=40)
+        X_train, X_test, y_train, y_test = train_test_split(df_3, y72_3, test_size=0.3, random_state=40, stratify = df_3['INTY'])
+        #X_train, X_test, y_train, y_test = train_test_split(df_3, y72_3, test_size=0.3, random_state=40)
     
         #了解哪些是缺失的 
         pr = get_nan_pr(X_train,cols)
+        pr2 = get_nan_pr(X_test,cols)
         miss = [i>0 for i in pr]
+        miss2 = [i>0 for i in pr2]
         col_to_drop = []
+        miss_feature = []
         cnt = 0
         for i in column_keys:           
                #print(i) 
-            if pr[cnt]>0.3: # 缺失>30%
+            if miss[cnt] or miss2[cnt]:
+               miss_feature.append(i)
+            if pr[cnt]>0.3 or pr2[cnt]>0.3: # 缺失>30%
                col_to_drop.append(i)
+               
             cnt+=1
         # 移除缺失太多的feature
         X_train_ = X_train.drop(col_to_drop,axis = 1)
-        X_test_ = X_train.drop(col_to_drop,axis = 1)
+        X_test_ = X_test.drop(col_to_drop,axis = 1)
         #   
-        preprocessed_X, ytrain, preprocessed_X_test, encoding_head_flat = preprocess(X_train_, y_train, X_test_, y_test, cols) 
+        preprocessed_X, ytrain, preprocessed_X_test, encoding_head_flat = preprocess(X_train_, y_train, X_test_, cols, miss_feature) 
     
         #======imbalanced 處理？
         unbalanced_corret = True
