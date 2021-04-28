@@ -42,6 +42,8 @@ from tabulate import tabulate
 def pre_encode(data,tag,mds):
     data_copy = data.copy()  # prevent mutable      
     scale_param = []
+    encoder = []
+    #feature_name = []
     if tag == 1: # for continuous data
     
        data_copy = fconvert(data_copy) # widen the precision
@@ -63,15 +65,18 @@ def pre_encode(data,tag,mds):
           out = data_copy
           
     elif tag == 0:   
-       encoder = OneHotEncoder(sparse=False)
+       # 把這個輸出 用同一個來處理test
+       encoder = OneHotEncoder(sparse=False, handle_unknown = 'ignore')
        out = encoder.fit_transform(data_copy)
+       #feature_name = encoder.get_feature_names()
     elif tag == 2:  
        out = data_copy
     else:
-       print('wrong code')        
-    return out, scale_param
+       print('wrong code')       
+     
+    return out, scale_param, encoder
 
-def test_encode(data,tag,scale_param,mds):
+def test_encode(data,tag,scale_param,mds,enc):
     data_copy = data.copy()  # prevent mutable      
     if tag == 1: # ordinal encoding
        
@@ -89,8 +94,8 @@ def test_encode(data,tag,scale_param,mds):
           out = data_copy
         
     elif tag == 0:   
-       encoder = OneHotEncoder(sparse=False)
-       out = encoder.fit_transform(data_copy)
+       #encoder = OneHotEncoder(sparse=False)
+       out = enc.transform(data_copy)
     elif tag == 2:  
        out = data_copy
     else:
@@ -283,40 +288,55 @@ def preprocess(X_train, y_train, X_test, cols, miss_feature):
     preprocessed_X = []
     preprocessed_X_test = []
     encoding_head = []
+    #encoding_head_ = {}
     scale_params = {}
-    cnt = 0 # initial
+    
     mcnt0 = []
+    cnt = 0 # initial
+    # train encoding
     for key, value in cols.items():
-
-        #print(key)
-
         data_col = X[key].values.reshape(-1,1)
-        out, scale_param = pre_encode(data_col, value, md_strategy)
+        out, scale_param, enc = pre_encode(data_col, value, md_strategy) 
         
         data_col_test = X_test[key].values.reshape(-1,1)
-        out_test = test_encode(data_col_test, value, scale_param, md_strategy)
-  
+        out_test = test_encode(data_col_test, value, scale_param, md_strategy, enc)
+        
         # n-1 for dummy variable, this means reference group is the first column
         if out.shape[1]>1:
            out = out[:,1:(out.shape[1])]
            out_test = out_test[:,1:(out_test.shape[1])]
-           
-        ec = [key for i in range(out.shape[1])]
-        encoding_head.append(ec)
+        
+        #encoding_head_[key] = feature_name
+        #ec = [key for i in range(out.shape[1])]
+        if value == 0:
+           feature_name = enc.get_feature_names()
+           encoding_head.append(feature_name[1:])
+        else:
+           encoding_head.append(key)
         #print(out.shape[1])   
         mcnt0.append(out.shape[1])
         #initialize
         if cnt == 0:
-           preprocessed_X = out
+           preprocessed_X = out  
            preprocessed_X_test = out_test
         else:
            preprocessed_X = np.concatenate((preprocessed_X, out), axis = 1)
-           preprocessed_X_test = np.concatenate((preprocessed_X_test, out_test), axis = 1)
-           
+           preprocessed_X_test = np.concatenate((preprocessed_X_test, out_test), axis = 1)    
+        
         cnt += 1
-           
     encoding_head_flat = [j for i in encoding_head for j in i]      
     
+    #cnt = 0 
+    # 把test encoding and train分開, 解決one hot encoding category 不一致的問題
+#    for key, value in cols.items():
+#        data_col_test = X_test[key].values.reshape(-1,1)
+#        out_test = test_encode(data_col_test, value, scale_param, md_strategy, encoding_head_)
+        
+#        if cnt == 0:
+#           preprocessed_X_test = out_test
+#        else:
+#           preprocessed_X_test = np.concatenate((preprocessed_X_test, out_test), axis = 1)    
+     
     return preprocessed_X, y72, preprocessed_X_test, encoding_head_flat
     
 def run_models(X_train_c, y_train_c, preprocessed_X_test, y_test, model_strat):
@@ -505,18 +525,18 @@ if __name__ == '__main__':
     
     # 切分subpopulation to build model
     strat_params = {}
-    strat_params['全'] = ''
-    sub_model = False
-    #strat_params['判別依據1'] = '檢傷判別條件為主訴=>腹痛,急性中樞中度疼痛(4-7)'
-   # strat_params['判別依據2'] = '檢傷判別條件為主訴=>眩暈/頭暈,姿勢性，無其他神經學症狀'
-   # strat_params['判別依據3'] = '檢傷判別條件為主訴=>胸痛/胸悶,急性中樞中度疼痛(4-7)'
-   # strat_params['判別依據4'] = '檢傷判別條件為主訴=>發燒/畏寒,發燒(看起來有病容)'                                           
-#    strat_params['判別依據5'] = '檢傷判別條件為主訴=>腰痛,急性中樞中度疼痛(4-7)'
-#    strat_params['判別依據6'] = '檢傷判別條件為主訴=>頭痛,急性中樞中度疼痛(4-7)'
-#    strat_params['判別依據7'] = '檢傷判別條件為主訴=>噁心/嘔吐,急性持續性嘔吐'
-#    strat_params['判別依據8'] = '檢傷判別條件為主訴=>眼睛疼痛,急性中樞中度疼痛(4-7)'
-#    strat_params['判別依據9'] = '檢傷判別條件為主訴=>背痛,急性中樞中度疼痛(4-7)'
-#    strat_params['判別依據10'] = '檢傷判別條件為主訴=>腹瀉,輕度脫水'
+    #strat_params['全'] = ''
+    sub_model = True
+    strat_params['判別依據1'] = '檢傷判別條件為主訴=>腹痛,急性中樞中度疼痛(4-7)'
+    strat_params['判別依據2'] = '檢傷判別條件為主訴=>眩暈/頭暈,姿勢性，無其他神經學症狀'
+    strat_params['判別依據3'] = '檢傷判別條件為主訴=>胸痛/胸悶,急性中樞中度疼痛(4-7)'
+    strat_params['判別依據4'] = '檢傷判別條件為主訴=>發燒/畏寒,發燒(看起來有病容)'                                           
+    strat_params['判別依據5'] = '檢傷判別條件為主訴=>腰痛,急性中樞中度疼痛(4-7)'
+    strat_params['判別依據6'] = '檢傷判別條件為主訴=>頭痛,急性中樞中度疼痛(4-7)'
+    strat_params['判別依據7'] = '檢傷判別條件為主訴=>噁心/嘔吐,急性持續性嘔吐'
+    strat_params['判別依據8'] = '檢傷判別條件為主訴=>眼睛疼痛,急性中樞中度疼痛(4-7)'
+    strat_params['判別依據9'] = '檢傷判別條件為主訴=>背痛,急性中樞中度疼痛(4-7)'
+    strat_params['判別依據10'] = '檢傷判別條件為主訴=>腹瀉,輕度脫水'
 
     #strat_params['中分類'] = '腹痛'
     
@@ -572,7 +592,7 @@ if __name__ == '__main__':
         if unbalanced_corret:
            n_seeds_num=4000     
            if sub_model:
-              n_seeds_num=500               
+              n_seeds_num=50               
            undersample = OneSidedSelection(n_neighbors=1, n_seeds_S=n_seeds_num)
            #undersample = CondensedNearestNeighbour(n_neighbors=1)
            #undersample = NearMiss(version=1,n_neighbors = 3)
