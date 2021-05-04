@@ -17,8 +17,8 @@ from sklearn.metrics import roc_curve, auc, classification_report, average_preci
 from numpy.random import randint, seed
 from collections import Counter
 from sklearn import metrics
-#from sklearn.svm import LinearSVC
-from sklearn.svm import SVC
+from sklearn.svm import LinearSVC
+#from sklearn.svm import SVC
 from sklearn.neural_network import MLPClassifier
 from sklearn.preprocessing import StandardScaler, RobustScaler
 from sklearn.model_selection import train_test_split, KFold
@@ -232,7 +232,7 @@ def get_nan_pr(data,cols):
     pr = []
     for i in cols.keys():        
         tmp = (data[i].isnull()) | (data[i].isna())
-        pr.append(sum(tmp)/len(df))  
+        pr.append([i,sum(tmp)/data.shape[0]])  
     return pr  
 
 def model_result(y_test, bst, modelname, X_test):
@@ -248,9 +248,17 @@ def table_r(cp,cm,auc):
     c=[np.array(lines[2].split()[1:4]), np.array(lines[3].split()[1:4])]
     out = np.concatenate((cm,c),axis=1)
     cc = np.array([auc, np.nan])
-    out = np.concatenate((out,cc.reshape(2,-1)),axis=1)
+    out = np.concatenate((out,cc.reshape(2,-1)),axis=1)    
     print(tabulate(out, headers=['p0', 'p1','precision','recall','f1','AUC']))
     
+    tb = tabulate(out, headers=['p0', 'p1','precision','recall','f1','AUC'])
+    return tb
+    
+    # except:
+    #     filename = 'M''-'+'classifier'+'-'+cl+'.txt'
+    #     with open('/home/anpo/Desktop/pyscript/EDr_72/'+filename, 'w') as f:
+    #          f.write(tabulate(out, headers=['p0', 'p1','precision','recall','f1','AUC']))
+        
 def preprocess(X_train, y_train, X_test, cols, miss_feature):  
     
     X = X_train.copy()      
@@ -341,19 +349,23 @@ def preprocess(X_train, y_train, X_test, cols, miss_feature):
     
 def run_models(X_train_c, y_train_c, preprocessed_X_test, y_test, model_strat):
         ## 跑model      
-    clf1 = LogisticRegression(random_state=0, max_iter=3000)
+    clf1 = LogisticRegression(random_state=0, max_iter=5000)
+    print('running LG')
     bst_lg, models, kidx, aucs_lg = ml_model(clf1, X_train_c, y_train_c)
     
     clf2 = RandomForestClassifier(random_state=0)  ## 隨機森林
+    print('running RF')
     bst_rf, models, kidx, aucs_rf = ml_model(clf2, X_train_c, y_train_c)
     
      # # clf3 = XGBClassifier(use_label_encoder=False, eval_metric="error")    
      # # bst_xgb, models, kidx, aucs_xgb, eval_set = model_xgb(clf3, X_train_c, y_train_c)
     
     clf3 = XGBClassifier(use_label_encoder=False, eval_metric="error")    
+    print('running XGB')
     bst_xgb, models, kidx, aucs_xgb = ml_model(clf3, X_train_c, y_train_c)
 
-    clf4 = SVC(gamma='auto', random_state=0)   
+    clf4 = LinearSVC(random_state=0, tol=1e-5, dual=False, max_iter = 10000) 
+    print('running SVC')
     bst_svm, models, kidx, aucs_svm = ml_model(clf4, X_train_c, y_train_c)
 
     eclf1 = VotingClassifier(estimators=[('lg', clf1), ('rf', clf2), ('xgb', clf3)], voting='soft', weights = [2.5,5,2.5])
@@ -379,15 +391,22 @@ def run_models(X_train_c, y_train_c, preprocessed_X_test, y_test, model_strat):
     #if not model_strat:
     print(model_strat)
     print('LG')
-    table_r(cp_lg,cm_lg,lg_auc)
+    tb1 = table_r(cp_lg,cm_lg,lg_auc)
     print('RF')
-    table_r(cp_rf,cm_rf,rf_auc)
+    tb2 = table_r(cp_rf,cm_rf,rf_auc)
     print('XGB')
-    table_r(cp_xg,cm_xg,xgb_auc)
+    tb3 = table_r(cp_xg,cm_xg,xgb_auc)
     print('SVM')
-    table_r(cp_sv,cm_sv,svm_auc)
+    tb4 = table_r(cp_sv,cm_sv,svm_auc)
     print('EC')
-    table_r(cp_ec,cm_ec,ec_auc)
+    tb5 = table_r(cp_ec,cm_ec,ec_auc)
+    
+    filename = 'M'+model_strat+'result.txt'
+    ftb = 'LG' + '\n' + tb1 + '\n' +'RF' + '\n' + tb2 + '\n' +'XGB' + '\n' + tb3 + '\n' +'SVM' + '\n' + tb4 + '\n' +'EC' + '\n' + tb5 + '\n'
+           
+    with open('/home/anpo/Desktop/pyscript/EDr_72/'+filename, 'w') as f:
+         f.write(ftb)
+    
     
     # # finding the best weight for voting classifier
     # weights_comb = [[3,3.5,3.5],[5,2.5,2.5],[7,1.5,1.5],[9,0.5,0.5]]
@@ -410,9 +429,9 @@ def run_models(X_train_c, y_train_c, preprocessed_X_test, y_test, model_strat):
 
 if __name__ == '__main__':
 
-    #data_root_folder = '/home/anpo/Desktop/pyscript/EDr_72/'
-    data_root_folder = '/Users/chengchichu/Desktop/py/EDr_72/'
-    df = pd.read_csv(data_root_folder+'CGRDER_20210422_v11.csv', encoding = 'big5')
+    data_root_folder = '/home/anpo/Desktop/pyscript/EDr_72/'
+    #data_root_folder = '/Users/chengchichu/Desktop/py/EDr_72/'
+    df = pd.read_csv(data_root_folder+'CGRDER_20210503_v11_3877.csv', encoding = 'big5')
     
     #df2 = pd.read_csv('/home/anpo/Desktop/pyscript/EDr_72/er72_processed_DATA_v10_ccs_converted.csv')
 
@@ -475,7 +494,7 @@ if __name__ == '__main__':
     cols['Hct_value'] = 1
     cols['RBC_value'] = 1
     cols['WBC_value'] = 1
-    #cols['中分類'] = 2
+    # cols['細分類'] = 2
     #cols['大分類'] = 2
     cols['判別依據'] = 2
 
@@ -525,28 +544,33 @@ if __name__ == '__main__':
     
     # 切分subpopulation to build model
     strat_params = {}
-    #strat_params['全'] = ''
+    # strat_params['全'] = ''
     sub_model = True
-    strat_params['判別依據1'] = '檢傷判別條件為主訴=>腹痛,急性中樞中度疼痛(4-7)'
-    strat_params['判別依據2'] = '檢傷判別條件為主訴=>眩暈/頭暈,姿勢性，無其他神經學症狀'
-    strat_params['判別依據3'] = '檢傷判別條件為主訴=>胸痛/胸悶,急性中樞中度疼痛(4-7)'
-    strat_params['判別依據4'] = '檢傷判別條件為主訴=>發燒/畏寒,發燒(看起來有病容)'                                           
-    strat_params['判別依據5'] = '檢傷判別條件為主訴=>腰痛,急性中樞中度疼痛(4-7)'
-    strat_params['判別依據6'] = '檢傷判別條件為主訴=>頭痛,急性中樞中度疼痛(4-7)'
-    strat_params['判別依據7'] = '檢傷判別條件為主訴=>噁心/嘔吐,急性持續性嘔吐'
-    strat_params['判別依據8'] = '檢傷判別條件為主訴=>眼睛疼痛,急性中樞中度疼痛(4-7)'
-    strat_params['判別依據9'] = '檢傷判別條件為主訴=>背痛,急性中樞中度疼痛(4-7)'
-    strat_params['判別依據10'] = '檢傷判別條件為主訴=>腹瀉,輕度脫水'
+    # strat_params['判別依據1'] = '檢傷判別條件為主訴=>腹痛,急性中樞中度疼痛(4-7)'
+    # strat_params['判別依據2'] = '檢傷判別條件為主訴=>眩暈/頭暈,姿勢性，無其他神經學症狀'
+    # strat_params['判別依據3'] = '檢傷判別條件為主訴=>胸痛/胸悶,急性中樞中度疼痛(4-7)'
+    # strat_params['判別依據4'] = '檢傷判別條件為主訴=>發燒/畏寒,發燒(看起來有病容)'                                           
+    # strat_params['判別依據5'] = '檢傷判別條件為主訴=>腰痛,急性中樞中度疼痛(4-7)'
+    # strat_params['判別依據6'] = '檢傷判別條件為主訴=>頭痛,急性中樞中度疼痛(4-7)'
+    # strat_params['判別依據7'] = '檢傷判別條件為主訴=>噁心/嘔吐,急性持續性嘔吐' #seed 50 above
+    # strat_params['判別依據8'] = '檢傷判別條件為主訴=>眼睛疼痛,急性中樞中度疼痛(4-7)'
+    # strat_params['判別依據9'] = '檢傷判別條件為主訴=>背痛,急性中樞中度疼痛(4-7)'
+    # strat_params['判別依據10'] = '檢傷判別條件為主訴=>腹瀉,輕度脫水'
 
-    #strat_params['中分類'] = '腹痛'
+    
+    strat_params['DPT2_1'] = 1
+    strat_params['DPT2_3'] = 3
+
     
     # 刪掉用來分類的類別
-    keys_to_remove = ['判別依據']
+    keys_to_remove = ['判別依據','DPT2']
     for key in keys_to_remove:
         cols.pop(key)    
 
+    total_cols = {} 
     for key, val in strat_params.items():
         print(val)
+        total_cols[key] = cols.keys()
         if sub_model:
            df_3 = df_cat[df_cat[key[:4]] == val]
            y72_3 = y72[df_cat[key[:4]] == val]
@@ -565,27 +589,20 @@ if __name__ == '__main__':
         #了解哪些是缺失的 
         pr = get_nan_pr(X_train,cols)
         pr2 = get_nan_pr(X_test,cols)
-        miss = [i>0 for i in pr]
-        miss2 = [i>0 for i in pr2]
-        col_to_drop = []
-        miss_feature = []
-        cnt = 0
-        for i in column_keys:           
-               #print(i) 
-            if miss[cnt] or miss2[cnt]:
-               miss_feature.append(i)
-            if pr[cnt]>0.5 or pr2[cnt]>0.5: # 缺失>50%
-               col_to_drop.append(i)
-               
-            cnt+=1
+        # col_to_drop = []
+        miss_feature = [i[0] for i,j in zip(pr,pr2) if i[1]>0 or j[1]>0]
+        #cnt = 0
+        col_to_drop = [i[0] for i,j in zip(pr,pr2) if i[1]>0.5 or j[1]>0.5]
+
         # 移除缺失太多的feature, cols也跟著移掉
         X_train_ = X_train.drop(col_to_drop,axis = 1)
         X_test_ = X_test.drop(col_to_drop,axis = 1)
+        cols_copy = cols.copy()
         for i in col_to_drop:
-            cols.pop(i)
+            cols_copy.pop(i)
         
-        assert(X_train_.shape[1] == len(cols))
-        preprocessed_X, ytrain, preprocessed_X_test, encoding_head_flat = preprocess(X_train_, y_train, X_test_, cols, miss_feature) 
+        assert(X_train_.shape[1] == len(cols_copy))
+        preprocessed_X, ytrain, preprocessed_X_test, encoding_head_flat = preprocess(X_train_, y_train, X_test_, cols_copy, miss_feature) 
     
         #======imbalanced 處理？
         unbalanced_corret = True
