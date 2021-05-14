@@ -131,7 +131,7 @@ def ml_model(clf,data_X,data_y):
         # 只對xtrain做bootstrapping
         xtrain = data_X[data_size[train],:]
         ytrain = data_y[data_size[train]]        
-        xtrain, ytrain = bootstrap(xtrain, ytrain)
+        # xtrain, ytrain = bootstrap(xtrain, ytrain)
         xtest = data_X[data_size[test],:]
         ytest = data_y[data_size[test]]
         model = clf.fit(xtrain, ytrain)
@@ -250,6 +250,7 @@ def preprocess(X_train, y_train, X_test, cols, miss_feature):
     preprocessed_X_test = []
     encoding_head = []
     #encoding_head_ = {}
+    encoding_head_flat = []
     scale_params = {}   
     mcnt0 = []
     cnt = 0 # initial
@@ -270,7 +271,14 @@ def preprocess(X_train, y_train, X_test, cols, miss_feature):
         #ec = [key for i in range(out.shape[1])]
         if value == 0:
            feature_name = enc.get_feature_names()
-           encoding_head.append(feature_name[1:])
+           f0 = [i for i in feature_name]
+           L = out.shape[1]
+           N = -1-L+1
+           x2 = f0[N:]           
+           assert(out.shape[1] == len(x2))  
+           for j in x2:
+               encoding_head.append(j)
+           
         else:
            encoding_head.append(key)
         #print(out.shape[1])   
@@ -282,21 +290,41 @@ def preprocess(X_train, y_train, X_test, cols, miss_feature):
         else:
            preprocessed_X = np.concatenate((preprocessed_X, out), axis = 1)
            preprocessed_X_test = np.concatenate((preprocessed_X_test, out_test), axis = 1)    
-        
+           
+        # L = out.shape[1]
+        # print(L)
+        # N = -1-L+1
+        # print(N)
+        # print(atmp[N:][0])
+        # print(key)
+        # print(encoding_head)
+        # if value == 0:
+           
         cnt += 1
-    encoding_head_flat = [j for i in encoding_head for j in i]      
-        
-    return preprocessed_X, y72, preprocessed_X_test, encoding_head_flat
+    #encoding_head_flat = [j for i in encoding_head for j in i]      
+    #print(len(encoding_head))    
     
-def run_models(X_train_c, y_train_c, preprocessed_X_test, y_test, model_strat):
+    return preprocessed_X, y72, preprocessed_X_test, encoding_head
+    
+def run_models(X_train_c, y_train_c, preprocessed_X_test, y_test, model_strat, encoding_head):
         ## 跑model      
     clf1 = LogisticRegression(random_state=0, max_iter=5000)
     print('running LG')
     bst_lg, models, kidx, aucs_lg = ml_model(clf1, X_train_c, y_train_c)
     
+    # LG imp
+    imp = pd.DataFrame(data = abs(bst_lg.coef_[0]),columns = ['lg_beta'])
+    head = pd.DataFrame(data = encoding_head,columns = ['features'])
+    imp2 = pd.concat([imp, head],axis = 1)
+    print(imp2.sort_values(by=['lg_beta'],ascending = False))
+    
     clf2 = RandomForestClassifier(random_state=0)  ## 隨機森林
     print('running RF')
     bst_rf, models, kidx, aucs_rf = ml_model(clf2, X_train_c, y_train_c)
+    
+    imp = pd.DataFrame(data = abs(bst_rf.feature_importances_),columns = ['rf_importance'])
+    imp2 = pd.concat([imp, head],axis = 1)
+    print(imp2.sort_values(by=['rf_importance'],ascending = False))
     
      # # clf3 = XGBClassifier(use_label_encoder=False, eval_metric="error")    
      # # bst_xgb, models, kidx, aucs_xgb, eval_set = model_xgb(clf3, X_train_c, y_train_c)
@@ -365,13 +393,27 @@ def run_models(X_train_c, y_train_c, preprocessed_X_test, y_test, model_strat):
         # fpr, tpr, thresholds = metrics.roc_curve(y_test, bst_eclf.predict_proba(preprocessed_X_test)[:,1])
         # print(metrics.auc(fpr, tpr))
 
+def rand_selection(xdata, ydata):
+    
+     y0 = ydata[ydata==0]
+     y1 = ydata[ydata==1]
+     y0_sub = y0[0:len(y1)] 
+     rey = np.concatenate((y0_sub,y1))
+     
+     x0 = xdata[ydata==0,:]
+     x1 = xdata[ydata==1,:]
+     x0_sub = x0[0:len(y1),:]     
+     reX = np.concatenate((x0_sub,x1))
+     
+     return reX, rey
+          
 # ####### where the code start 
 
 if __name__ == '__main__':
 
     data_root_folder = '/home/anpo/Desktop/pyscript/EDr_72/'
     #data_root_folder = '/Users/chengchichu/Desktop/py/EDr_72/'
-    df = pd.read_csv(data_root_folder+'CGRDER_20210503_v11_3877.csv', encoding = 'big5')
+    df = pd.read_csv(data_root_folder+'CGRDER_20210512_v12.csv', encoding = 'big5')
     
     #df2 = pd.read_csv('/home/anpo/Desktop/pyscript/EDr_72/er72_processed_DATA_v10_ccs_converted.csv')
 
@@ -424,7 +466,8 @@ if __name__ == '__main__':
     cols['RBC_value'] = 1
     cols['WBC_value'] = 1
     cols['細分類'] = 2
-    #cols['大分類'] = 2
+    cols['中分類'] = 2
+    cols['大分類'] = 2
     cols['判別依據'] = 2
 
     # # make sure you get ccs right in CCS_distribution py
@@ -449,7 +492,14 @@ if __name__ == '__main__':
     column_keys = cols.keys()
     df_cat = df[cols.keys()]
     y72 = df['re72'] 
-            
+ 
+    # 同主訴的子群  
+    complaint = '細分類'
+    # y72 = (y72.astype(bool)) & (df['細分類'].values == df['下次細分類'].values)  
+    y72 = (y72.astype(bool)) & (df[complaint].values != df['下次'+complaint].values)
+    df_cat = df_cat[~df[complaint].isna()]
+    y72 = y72[~df[complaint].isna()]    
+           
     # 對類別變項檢查, 如果只有一個sample移除, 無法平均的分給train and test    
     cat_cols = ['SEX','ANISICCLSF_C','INTY','week','weekday','indate_time_gr']   
     row_idx = np.empty(0).astype(int)    
@@ -464,8 +514,8 @@ if __name__ == '__main__':
                
     # 切分subpopulation to build model
     strat_params = {}
-    # strat_params['全'] = ''
-    sub_model = True
+    strat_params['全'] = ''
+    sub_model = False
     # strat_params['判別依據1'] = '檢傷判別條件為主訴=>腹痛,急性中樞中度疼痛(4-7)'
     # strat_params['判別依據2'] = '檢傷判別條件為主訴=>眩暈/頭暈,姿勢性，無其他神經學症狀'
     # strat_params['判別依據3'] = '檢傷判別條件為主訴=>胸痛/胸悶,急性中樞中度疼痛(4-7)'
@@ -477,11 +527,44 @@ if __name__ == '__main__':
     # strat_params['判別依據9'] = '檢傷判別條件為主訴=>背痛,急性中樞中度疼痛(4-7)'
     # strat_params['判別依據10'] = '檢傷判別條件為主訴=>腹瀉,輕度脫水'
 
-    strat_params['DPT2_1'] = 1
-    # strat_params['DPT2_3'] = 3
+    # strat_params['細分類1'] = '急性中樞中度疼痛(4-7)'
+    # strat_params['細分類2'] = '發燒(看起來有病容)'
+    # strat_params['細分類3'] = '急性周邊重度疼痛(8-10)'
+    # strat_params['細分類4'] = '姿勢性，無其他神經學症狀'                                           
+    # strat_params['細分類5'] = '急性周邊中度疼痛(4-7)'
+    # strat_params['細分類6'] = '血壓或心跳有異於病人之平常數值，但血行動力穩定'
+    # strat_params['細分類'] = '輕度呼吸窘迫(92-94%)' #seed 50 above
+    # strat_params['細分類8'] = '急性持續性嘔吐'       
+    # strat_params['細分類9'] = '急性中樞輕度疼痛(＜4)'
+    # strat_params['細分類10'] = '輕度脫水'
+    
+    # strat_params['中分類1'] = '腹痛'
+    # strat_params['中分類2'] = '眩暈/頭暈'
+    # strat_params['中分類3'] = '胸痛/胸悶'
+    # strat_params['中分類4'] = '發燒/畏寒'                                           
+    # strat_params['中分類5'] = '噁心/嘔吐'
+    # strat_params['中分類6'] = '局部紅腫' 
+    # strat_params['中分類7'] = '頭痛' 
+    # strat_params['中分類8'] = '腰痛'       
+    # strat_params['中分類9'] = '咳嗽'
+    # strat_params['中分類10'] = '紅疹'
+    
+    # strat_params['大分類1'] = '腸胃系統'
+    # strat_params['大分類2'] = '神經系統'
+    # strat_params['大分類3'] = '心臟血管系統'
+    # strat_params['大分類4'] = '一般和其他'                                           
+    # strat_params['大分類5'] = '耳鼻喉系統'
+    # strat_params['大分類6'] = '泌尿系統' 
+    # strat_params['大分類'] = '皮膚系統' 
+    # strat_params['大分類8'] = '骨骼系統'       
+    # strat_params['大分類9'] = '呼吸系統'
+    # strat_params['大分類10'] = '眼科'
 
+    # strat_params['DPT2_1'] = 1
+    # strat_params['DPT2_3'] = 3
+           
     # 刪掉用來分類的類別
-    keys_to_remove = ['判別依據','DPT2']
+    keys_to_remove = ['判別依據','細分類','中分類','大分類']
     for key in keys_to_remove:
         cols.pop(key)    
 
@@ -490,15 +573,21 @@ if __name__ == '__main__':
         print(val)
         total_cols[key] = cols.keys()
         if sub_model:
-           #df_3 = df_cat[(df_cat[key[:4]] == val) & (df_cat['age1']>65)]
-           #y72_3 = y72[(df_cat[key[:4]] == val) & (df_cat['age1']>65)] 
-           # df_3 = df_cat[(df_cat[key[:4]] == val) & (df_cat['ER_LOS']>df_cat['ER_LOS'].mean())]
-           # y72_3 = y72[(df_cat[key[:4]] == val) & (df_cat['ER_LOS']>df_cat['ER_LOS'].mean())] 
-           df_3 = df_cat[df_cat[key[:4]] == val]
-           y72_3 = y72[df_cat[key[:4]] == val]
+           df_3 = df_cat[(df_cat[key[:4]] == val) & (df_cat['age1']<65)]
+           y72_3 = y72[(df_cat[key[:4]] == val) & (df_cat['age1']<65)] 
+           # df_3 = df_cat[(df_cat[key[:4]] == val) & (df_cat['ER_LOS']<df_cat['ER_LOS'].mean())]
+           # y72_3 = y72[(df_cat[key[:4]] == val) & (df_cat['ER_LOS']<df_cat['ER_LOS'].mean())] 
+           # df_3 = df_cat[(df_cat[key[:4]] == val) & (df_cat['Dr_VSy']<df_cat['Dr_VSy'].mean())]
+           # y72_3 = y72[(df_cat[key[:4]] == val) & (df_cat['Dr_VSy']<df_cat['Dr_VSy'].mean())] 
            
+                
+           # df_3 = df_cat[df_cat[key[:4]] == val]
+           # y72_3 = y72[df_cat[key[:4]] == val]
+           # df_3 = df_cat[df_cat[key[:3]] == val]
+           # y72_3 = y72[df_cat[key[:3]] == val]
+                       
         else:    
-           # sub model老人 
+           # 老人 
            # df_3 = df_cat[df_cat['age1']>65]   
            # y72_3 = y72[df_cat['age1']>65] 
            # df_3 = df_cat[df_cat['ER_LOS']>df_cat['ER_LOS'].mean()]   
@@ -530,29 +619,33 @@ if __name__ == '__main__':
             cols_copy.pop(i)
         
         assert(X_train_.shape[1] == len(cols_copy))
-        preprocessed_X, ytrain, preprocessed_X_test, encoding_head_flat = preprocess(X_train_, y_train, X_test_, cols_copy, miss_feature) 
+        preprocessed_X, ytrain, preprocessed_X_test, encoding_head = preprocess(X_train_, y_train, X_test_, cols_copy, miss_feature) 
+            
     
         #======imbalanced 處理？
-        unbalanced_corret = True
-        if unbalanced_corret:
-            n_seeds_num=4000     
-            if sub_model:
-               n_seeds_num = 50
-               reX = np.array([0])
-               while reX.shape[0] < preprocessed_X_test.shape[0]:            
-                     undersample = OneSidedSelection(n_neighbors=1, n_seeds_S=n_seeds_num)
-                  #undersample = CondensedNearestNeighbour(n_neighbors=1, n_seeds_S=n_seeds_num)
-                  #undersample = NearMiss(version=1,n_neighbors = 3)
-                     reX, rey = undersample.fit_resample(preprocessed_X, ytrain.values)
-                     n_seeds_num = n_seeds_num-10
-                 
-            X_train_c = reX.copy()
-            y_train_c = rey.copy()
+    
+        n_seeds_num=4000     
+        if sub_model:                      
+           n_seeds_num = 50
+           reX = np.array([0])
+           while reX.shape[0] < preprocessed_X_test.shape[0]:            
+                 undersample = OneSidedSelection(n_neighbors=1, n_seeds_S=n_seeds_num)
+                    #undersample = CondensedNearestNeighbour(n_neighbors=1, n_seeds_S=n_seeds_num)
+                    #undersample = NearMiss(version=1,n_neighbors = 3)                               
+                 reX, rey = undersample.fit_resample(preprocessed_X, ytrain.values)         
+                 n_seeds_num = n_seeds_num-10
+                       
+           X_train_c = reX.copy()
+           y_train_c = rey.copy()
         else:
-            X_train_c = preprocessed_X.copy()
-            y_train_c = ytrain.values.copy()
+           # X_train_c = preprocessed_X.copy()
+           # y_train_c = ytrain.values.copy()
+           
+           reX, rey = rand_selection(preprocessed_X, ytrain.values)
+           X_train_c = reX.copy()
+           y_train_c = rey.copy()
         
-        run_models(X_train_c, y_train_c, preprocessed_X_test, y_test, key)
+        run_models(X_train_c, y_train_c, preprocessed_X_test, y_test, key, encoding_head)
 
     # # save data for autoML
     # import pickle
@@ -654,16 +747,7 @@ if __name__ == '__main__':
 #savemat('er72data.mat',erData)
 ############functions#####################
 
-    # 模型performance based on AUC 
-#def model_auc(model, preprocessed_X, y_true):
-#    try: 
-#       y_score = model.decision_function(preprocessed_X)   
-#    except:
-#       y_score = model.predict_proba(preprocessed_X)[:,1]  
-#    fpr, tpr, _ = roc_curve(y_true, y_score)
-#    roc_auc = auc(fpr, tpr)
-#    auprc = average_precision_score(y_true, y_score)
-#    return roc_auc, auprc
+
 #
 ## 其他模型performance指標
 #def model_report(model, preprocessed_X, y_true, class_labels):
