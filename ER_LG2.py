@@ -6,6 +6,9 @@ Created on Thu Dec 31 09:55:50 2020
 @author: chengchichu
 """
 
+# machine learning for predicting 72hour unscheduled revisit in ER
+
+
 import pandas as pd
 from sklearn.linear_model import LogisticRegression
 from sklearn.preprocessing import OneHotEncoder
@@ -131,7 +134,7 @@ def ml_model(clf,data_X,data_y):
         # 只對xtrain做bootstrapping
         xtrain = data_X[data_size[train],:]
         ytrain = data_y[data_size[train]]        
-        # xtrain, ytrain = bootstrap(xtrain, ytrain)
+        xtrain, ytrain = bootstrap(xtrain, ytrain)
         xtest = data_X[data_size[test],:]
         ytest = data_y[data_size[test]]
         model = clf.fit(xtrain, ytrain)
@@ -191,8 +194,14 @@ def bootstrap(datax,datay):
     return datax_balanced, datay_balanced
     
 def get_nan_pr(data,cols):
+    
+    try:
+       keys = cols.keys()
+    except:
+       keys = cols
+       
     pr = []
-    for i in cols.keys():        
+    for i in keys:        
         tmp = (data[i].isnull()) | (data[i].isna())
         pr.append([i,sum(tmp)/data.shape[0]])  
     return pr  
@@ -216,20 +225,11 @@ def table_r(cp,cm,auc):
     tb = tabulate(out, headers=['p0', 'p1','precision','recall','f1','AUC'])
     return tb
 
-def preprocess(X_train, y_train, X_test, cols, miss_feature):  
+def preprocess(X_train, y_train, X_test, cols, fs_to_imp):  
     
     X = X_train.copy()      
     y72 = y_train.copy() 
-    # 新增類別不太適合, 缺失太少, train test split 類別不平均 
-    X['INTY'].fillna(value=6, inplace=True)
-    X_test['INTY'].fillna(value=6, inplace=True)
-    # 連續類別確認為數字
-    fs_to_imp = []       
-    for i,j in cols.items():
-        if (j == 1) and (i in miss_feature):
-           X = assert_number(X, i)
-           X_test = assert_number(X_test, i)
-           fs_to_imp.append(i)             
+ 
     # imputation
     md_strategy = True
     if md_strategy:    
@@ -373,7 +373,7 @@ def run_models(X_train_c, y_train_c, preprocessed_X_test, y_test, model_strat, e
     filename = 'M'+model_strat+'result.txt'
     ftb = 'LG' + '\n' + tb1 + '\n' +'RF' + '\n' + tb2 + '\n' +'XGB' + '\n' + tb3 + '\n' +'SVM' + '\n' + tb4 + '\n' +'EC' + '\n' + tb5 + '\n'
            
-    with open('/home/anpo/Desktop/pyscript/EDr_72/'+filename, 'w') as f:
+    with open('/Users/chengchichu/Desktop/py/EDr_72/'+filename, 'w') as f:
          f.write(ftb+'\n'+'train_size:'+str(X_train_c.shape[0])+'\n'+'test_size:'+str(preprocessed_X_test.shape[0]))
       
     # # finding the best weight for voting classifier
@@ -407,38 +407,107 @@ def rand_selection(xdata, ydata):
      
      return reX, rey
           
+def deal_miss_nan(X, y):
+      
+    Xcopy = X.copy()
+    ycopy = y.copy()
+
+    # 極端值處理 連續類別之缺失
+    cont_cols = ['ER_LOS','age1','TMP','PULSE','BPS','BPB','Dr_VSy','WEIGHT','SBP','DBP','Bun_value', \
+                 'CRP_value','Lactate_value','Procalcitonin_value','Creatine_value','Hb_value', \
+                 'Hct_value','RBC_value','WBC_value','BRTCNT','SPAO2','DD_visit_30','DD_visit_365', 'exam_TOTAL', \
+                 'lab_TOTAL','ER_visit_30','ER_visit_365']
+    
+    # 移除明顯極端值
+    #examining
+    #df_cat['PULSE'].value_counts().sort_index()
+    Xcopy = remove_extreme(Xcopy, 'TMP', [20, 45])
+    Xcopy = remove_extreme(Xcopy, 'PULSE', [10, 250]) 
+    Xcopy = remove_extreme(Xcopy, 'BPS', 0) 
+    Xcopy = remove_extreme(Xcopy, 'BPB', 0) 
+    Xcopy = remove_extreme(Xcopy, 'WEIGHT', [10, 400]) 
+    Xcopy = remove_extreme(Xcopy, 'SBP', [10, 400]) 
+    Xcopy = remove_extreme(Xcopy, 'DBP', [10, 400])
+    Xcopy = remove_extreme(Xcopy, 'BRTCNT', 0) 
+    Xcopy = remove_extreme(Xcopy, 'SPAO2', 10) 
+
+    fs = ['TMP','PULSE','BPS','BPB','WEIGHT','SBP','DBP','BRTCNT','SPAO2']
+    
+    for f in fs:
+        qs = Xcopy[f].quantile([0.25,0.75])
+        itq = qs[0.75]-qs[0.25]
+        
+        Bound = [qs[0.25]-1.5*qs[0.25], qs[0.75]+1.5*qs[0.75]]
+        
+        idx = Xcopy[ (Xcopy[f] < Bound[0]) | (Xcopy[f] > Bound[1] )].index  
+        # Any observations that are more than 1.5 IQR below Q1 or more than 1.5 IQR above Q3 are considered outliers.         
+        Xcopy.at[np.array(idx), f] = np.nan
+    
+    pr = get_nan_pr(Xcopy, cont_cols)
+    fs_to_imp = [i[0] for i in pr if i[1]>0] # preprocessing的時候 impute       
+    # 連續類別確認為數字    
+    for i in cont_cols:
+        Xcopy = assert_number(Xcopy, i)
+
+    # 不連續類別之缺失
+    cats = ['DPT2','SEX','ANISICCLSF_C','INTY','week','weekday','indate_time_gr','GCSE','GCSV','GCSM', \
+            'indate_month','ANISICMIGD','ANISICMIGD_1','ANISICMIGD_3','ct','MRI','xray','EKG','Echo'] 
+    for i in cats:
+        print(sum(Xcopy[i].isna()))     
+    
+    # 缺失新增類別
+    Xcopy['INTY'].fillna(value=10, inplace=True)
+    
+    # 對類別變項檢查, 如果只有<5 sample移除, 無法平均的分給train and test    
+    cat_cols = ['INTY']   
+    row_idx = np.empty(0).astype(int)    
+    for i in cat_cols:
+        table = Xcopy[i].value_counts()
+        for j,k in table.items():
+            if k <= 5:
+               row_idx = np.concatenate((row_idx,Xcopy[Xcopy[i].values == j].index.values),axis = 0)
+    Xcopy = Xcopy.drop(row_idx)       
+    ycopy = ycopy.drop(row_idx) 
+   
+    return Xcopy, ycopy, fs_to_imp
+    
+def remove_extreme(x, f, t):
+ 
+    try:
+        idx = x[(x[f]<t[0]) | (x[f]>t[1])].index    
+    except:
+        if t!=0:
+           idx = x[(x[f] < t)].index    
+        else:    
+           idx = x[(x[f] == t)].index    
+    
+    x.at[np.array(idx), f] = np.nan
+    
+    return x
+    
 # ####### where the code start 
 
 if __name__ == '__main__':
 
-    data_root_folder = '/home/anpo/Desktop/pyscript/EDr_72/'
-    #data_root_folder = '/Users/chengchichu/Desktop/py/EDr_72/'
+#    data_root_folder = '/home/anpo/Desktop/pyscript/EDr_72/'
+    data_root_folder = '/Users/chengchichu/Desktop/py/EDr_72/'
     df = pd.read_csv(data_root_folder+'CGRDER_20210512_v12.csv', encoding = 'big5')
-    
     #df2 = pd.read_csv('/home/anpo/Desktop/pyscript/EDr_72/er72_processed_DATA_v10_ccs_converted.csv')
 
     cols = {}
     cols['DPT2'] = 0
     # cols['drID'] = 2
     cols['SEX'] = 0 
-    cols['ANISICCLSF_C'] = 2
+    cols['ANISICCLSF_C'] = 1
     cols['INTY'] = 0
-    cols['ER_LOS'] = 1
-    cols['age1'] = 1
     cols['week'] = 0
     cols['weekday'] = 2
     cols['indate_time_gr'] = 0
-    cols['ER_visit_30'] = 1 # 
-    cols['ER_visit_365'] = 1
-    cols['TMP'] = 1
-    cols['PULSE'] = 1
-    cols['BPS'] = 1
-    cols['BPB'] = 1
-    cols['GCSE'] = 2
-    cols['GCSV'] = 2
-    cols['GCSM'] = 2
-    cols['BRTCNT'] = 1
-    cols['SPAO2'] = 1
+    cols['GCSE'] = 1
+    cols['GCSV'] = 1
+    cols['GCSM'] = 1
+    cols['BRTCNT'] = 1  #極端值處理
+    cols['SPAO2'] = 1 #極端值處理
     cols['DD_visit_30'] = 1
     cols['ct'] = 2
     cols['MRI'] = 2
@@ -446,16 +515,25 @@ if __name__ == '__main__':
     cols['EKG'] = 2
     cols['Echo'] = 2
     cols['DD_visit_365'] = 1
-    cols['Dr_VSy'] = 1
-    cols['WEIGHT'] = 1
     cols['indate_month'] = 0
-    cols['SBP'] = 1
-    cols['DBP'] = 1
     cols['exam_TOTAL'] = 1
     cols['lab_TOTAL'] = 1
-    cols['ANISICMIGD'] = 2
-    cols['ANISICMIGD_1'] = 2
-    cols['ANISICMIGD_3'] = 2
+    cols['ANISICMIGD'] = 1
+    cols['ANISICMIGD_1'] = 1
+    cols['ANISICMIGD_3'] = 1
+    
+    cols['ER_LOS'] = 1
+    cols['age1'] = 1
+    cols['ER_visit_30'] = 1 # 
+    cols['ER_visit_365'] = 1
+    cols['TMP'] = 1
+    cols['PULSE'] = 1
+    cols['BPS'] = 1
+    cols['BPB'] = 1
+    cols['Dr_VSy'] = 1
+    cols['WEIGHT'] = 1
+    cols['SBP'] = 1
+    cols['DBP'] = 1
     cols['Bun_value'] = 1
     cols['CRP_value'] = 1
     cols['Lactate_value'] = 1
@@ -465,10 +543,14 @@ if __name__ == '__main__':
     cols['Hct_value'] = 1
     cols['RBC_value'] = 1
     cols['WBC_value'] = 1
-    cols['細分類'] = 2
-    cols['中分類'] = 2
-    cols['大分類'] = 2
-    cols['判別依據'] = 2
+    
+#    cols['blood_lab'] # 血液檢查, 是否有其他項
+#    cols['urine_lab'] # 尿液檢查, 是否有其他項
+    #cols['WBC_rslt'] = 1 檢驗數值之類別化1,0,-1(缺失)
+    #cols['細分類'] = 0
+    cols['中分類'] = 0
+    #cols['大分類'] = 2
+    #cols['判別依據'] = 2
 
     # # make sure you get ccs right in CCS_distribution py
     # index admission的主診斷
@@ -493,105 +575,57 @@ if __name__ == '__main__':
     df_cat = df[cols.keys()]
     y72 = df['re72'] 
  
-    # 同主訴的子群  
-    complaint = '細分類'
-    # y72 = (y72.astype(bool)) & (df['細分類'].values == df['下次細分類'].values)  
-    y72 = (y72.astype(bool)) & (df[complaint].values != df['下次'+complaint].values)
-    df_cat = df_cat[~df[complaint].isna()]
-    y72 = y72[~df[complaint].isna()]    
-           
-    # 對類別變項檢查, 如果只有一個sample移除, 無法平均的分給train and test    
-    cat_cols = ['SEX','ANISICCLSF_C','INTY','week','weekday','indate_time_gr']   
-    row_idx = np.empty(0).astype(int)    
-    for i in cat_cols:
-        table = df_cat[i].value_counts()
-        for j,k in table.items():
-            if k <= 5:
-               #row_idx.append(df_3[df_3[i].values == j].index.values)
-               row_idx = np.concatenate((row_idx,df_cat[df_cat[i].values == j].index.values),axis = 0)
-    df_cat = df_cat.drop(row_idx)       
-    y72 = y72.drop(row_idx)       
-               
+    # 極端值處理, 缺失, 刪除sample太少類別, 確認連續類別為數字      
+    df_cat, y72, miss_feature = deal_miss_nan(df_cat, y72)
+    
+    
+        # 同主訴的子群 或 其他子群 >65, los>mean, 
+#    complaint = '細分類'
+#    # y72 = (y72.astype(bool)) & (df['細分類'].values == df['下次細分類'].values)  
+#    y72 = (y72.astype(bool)) & (df[complaint].values != df['下次'+complaint].values)
+#    df_cat = df_cat[~df[complaint].isna()]
+#    y72 = y72[~df[complaint].isna()]    
+    
+    # next ICU and next DEAD也可以用來stratification
+    
+    
     # 切分subpopulation to build model
-    strat_params = {}
-    strat_params['全'] = ''
-    sub_model = False
-    # strat_params['判別依據1'] = '檢傷判別條件為主訴=>腹痛,急性中樞中度疼痛(4-7)'
-    # strat_params['判別依據2'] = '檢傷判別條件為主訴=>眩暈/頭暈,姿勢性，無其他神經學症狀'
-    # strat_params['判別依據3'] = '檢傷判別條件為主訴=>胸痛/胸悶,急性中樞中度疼痛(4-7)'
-    # strat_params['判別依據4'] = '檢傷判別條件為主訴=>發燒/畏寒,發燒(看起來有病容)'                                           
-    # strat_params['判別依據5'] = '檢傷判別條件為主訴=>腰痛,急性中樞中度疼痛(4-7)'
-    # strat_params['判別依據6'] = '檢傷判別條件為主訴=>頭痛,急性中樞中度疼痛(4-7)'
-    # strat_params['判別依據7'] = '檢傷判別條件為主訴=>噁心/嘔吐,急性持續性嘔吐' #seed 50 above
-    # strat_params['判別依據8'] = '檢傷判別條件為主訴=>眼睛疼痛,急性中樞中度疼痛(4-7)'
-    # strat_params['判別依據9'] = '檢傷判別條件為主訴=>背痛,急性中樞中度疼痛(4-7)'
-    # strat_params['判別依據10'] = '檢傷判別條件為主訴=>腹瀉,輕度脫水'
-
-    # strat_params['細分類1'] = '急性中樞中度疼痛(4-7)'
-    # strat_params['細分類2'] = '發燒(看起來有病容)'
-    # strat_params['細分類3'] = '急性周邊重度疼痛(8-10)'
-    # strat_params['細分類4'] = '姿勢性，無其他神經學症狀'                                           
-    # strat_params['細分類5'] = '急性周邊中度疼痛(4-7)'
-    # strat_params['細分類6'] = '血壓或心跳有異於病人之平常數值，但血行動力穩定'
-    # strat_params['細分類'] = '輕度呼吸窘迫(92-94%)' #seed 50 above
-    # strat_params['細分類8'] = '急性持續性嘔吐'       
-    # strat_params['細分類9'] = '急性中樞輕度疼痛(＜4)'
-    # strat_params['細分類10'] = '輕度脫水'
-    
-    # strat_params['中分類1'] = '腹痛'
-    # strat_params['中分類2'] = '眩暈/頭暈'
-    # strat_params['中分類3'] = '胸痛/胸悶'
-    # strat_params['中分類4'] = '發燒/畏寒'                                           
-    # strat_params['中分類5'] = '噁心/嘔吐'
-    # strat_params['中分類6'] = '局部紅腫' 
-    # strat_params['中分類7'] = '頭痛' 
-    # strat_params['中分類8'] = '腰痛'       
-    # strat_params['中分類9'] = '咳嗽'
-    # strat_params['中分類10'] = '紅疹'
-    
-    # strat_params['大分類1'] = '腸胃系統'
-    # strat_params['大分類2'] = '神經系統'
-    # strat_params['大分類3'] = '心臟血管系統'
-    # strat_params['大分類4'] = '一般和其他'                                           
-    # strat_params['大分類5'] = '耳鼻喉系統'
-    # strat_params['大分類6'] = '泌尿系統' 
-    # strat_params['大分類'] = '皮膚系統' 
-    # strat_params['大分類8'] = '骨骼系統'       
-    # strat_params['大分類9'] = '呼吸系統'
-    # strat_params['大分類10'] = '眼科'
-
+  
     # strat_params['DPT2_1'] = 1
     # strat_params['DPT2_3'] = 3
            
-    # 刪掉用來分類的類別
-    keys_to_remove = ['判別依據','細分類','中分類','大分類']
+    # 主訴子模
+    sub_model = True
+    keys_to_remove = [] #
+    strat_params = {}
+    if sub_model:
+       key_to_strat = '中分類'
+       keys_to_remove.append(key_to_strat)
+       for ii in range(10):
+           dfcnts = df[key_to_strat].value_counts()
+           strat_params[key_to_strat+str(ii+1)] = dfcnts.index[ii]
+       #確定用來分子模的field存在    
+       if key_to_strat not in df_cat.columns:
+          raise NameError('Field not exist')
+          
+    else:
+       
+       strat_params['全'] = ''
+    #刪掉用來分類的類別
     for key in keys_to_remove:
         cols.pop(key)    
 
+    # 子模迴圈
     total_cols = {} 
     for key, val in strat_params.items():
         print(val)
         total_cols[key] = cols.keys()
         if sub_model:
-           df_3 = df_cat[(df_cat[key[:4]] == val) & (df_cat['age1']<65)]
-           y72_3 = y72[(df_cat[key[:4]] == val) & (df_cat['age1']<65)] 
-           # df_3 = df_cat[(df_cat[key[:4]] == val) & (df_cat['ER_LOS']<df_cat['ER_LOS'].mean())]
-           # y72_3 = y72[(df_cat[key[:4]] == val) & (df_cat['ER_LOS']<df_cat['ER_LOS'].mean())] 
-           # df_3 = df_cat[(df_cat[key[:4]] == val) & (df_cat['Dr_VSy']<df_cat['Dr_VSy'].mean())]
-           # y72_3 = y72[(df_cat[key[:4]] == val) & (df_cat['Dr_VSy']<df_cat['Dr_VSy'].mean())] 
-           
-                
-           # df_3 = df_cat[df_cat[key[:4]] == val]
-           # y72_3 = y72[df_cat[key[:4]] == val]
-           # df_3 = df_cat[df_cat[key[:3]] == val]
-           # y72_3 = y72[df_cat[key[:3]] == val]
-                       
+           # 以主訴再分     
+           df_3 = df_cat[df_cat[key[:len(key_to_strat)]] == val]
+           y72_3 = y72[df_cat[key[:len(key_to_strat)]] == val]
         else:    
-           # 老人 
-           # df_3 = df_cat[df_cat['age1']>65]   
-           # y72_3 = y72[df_cat['age1']>65] 
-           # df_3 = df_cat[df_cat['ER_LOS']>df_cat['ER_LOS'].mean()]   
-           # y72_3 = y72[df_cat['ER_LOS']>df_cat['ER_LOS'].mean()] 
+           # 不以主訴再分    
            df_3 = df_cat 
            y72_3 = y72
        
@@ -606,17 +640,14 @@ if __name__ == '__main__':
         #了解哪些是缺失的 
         pr = get_nan_pr(X_train,cols)
         pr2 = get_nan_pr(X_test,cols)
-        # col_to_drop = []
-        miss_feature = [i[0] for i,j in zip(pr,pr2) if i[1]>0 or j[1]>0]
-        #cnt = 0
         col_to_drop = [i[0] for i,j in zip(pr,pr2) if i[1]>0.5 or j[1]>0.5]
-
         # 移除缺失太多的feature, cols也跟著移掉
         X_train_ = X_train.drop(col_to_drop,axis = 1)
         X_test_ = X_test.drop(col_to_drop,axis = 1)
         cols_copy = cols.copy()
         for i in col_to_drop:
             cols_copy.pop(i)
+            miss_feature.remove(i)
         
         assert(X_train_.shape[1] == len(cols_copy))
         preprocessed_X, ytrain, preprocessed_X_test, encoding_head = preprocess(X_train_, y_train, X_test_, cols_copy, miss_feature) 
@@ -638,12 +669,12 @@ if __name__ == '__main__':
            X_train_c = reX.copy()
            y_train_c = rey.copy()
         else:
-           # X_train_c = preprocessed_X.copy()
-           # y_train_c = ytrain.values.copy()
+           X_train_c = preprocessed_X.copy()
+           y_train_c = ytrain.values.copy()
            
-           reX, rey = rand_selection(preprocessed_X, ytrain.values)
-           X_train_c = reX.copy()
-           y_train_c = rey.copy()
+#           reX, rey = rand_selection(preprocessed_X, ytrain.values)
+#           X_train_c = reX.copy()
+#           y_train_c = rey.copy()
         
         run_models(X_train_c, y_train_c, preprocessed_X_test, y_test, key, encoding_head)
 
@@ -688,13 +719,6 @@ if __name__ == '__main__':
 
 
 
-    # # 對某些variability 非常小的feature還是作類別化處理 例如體溫
-    # X = add_cut(X, 'TMP', [37.5])
-    # X = add_cut(X, 'SPAO2', [94])
-    # X = add_cut(X, 'BRTCNT', [12, 20])
-    # X_test = add_cut(X_test, 'TMP', [37.5])
-    # X_test = add_cut(X_test, 'SPAO2', [94])
-    # X_test = add_cut(X_test, 'BRTCNT', [12, 20])
                
 
 
