@@ -306,7 +306,7 @@ def preprocess(X_train, y_train, X_test, cols, fs_to_imp):
     
     return preprocessed_X, y72, preprocessed_X_test, encoding_head
     
-def run_models(X_train_c, y_train_c, preprocessed_X_test, y_test, model_strat, encoding_head):
+def run_models(X_train_c, y_train_c, preprocessed_X_test, y_test, model_strat, encoding_head, data_root_folder):
         ## 跑model      
     clf1 = LogisticRegression(random_state=0, max_iter=5000)
     print('running LG')
@@ -373,7 +373,7 @@ def run_models(X_train_c, y_train_c, preprocessed_X_test, y_test, model_strat, e
     filename = 'M'+model_strat+'result.txt'
     ftb = 'LG' + '\n' + tb1 + '\n' +'RF' + '\n' + tb2 + '\n' +'XGB' + '\n' + tb3 + '\n' +'SVM' + '\n' + tb4 + '\n' +'EC' + '\n' + tb5 + '\n'
            
-    with open('/Users/chengchichu/Desktop/py/EDr_72/'+filename, 'w') as f:
+    with open(data_root_folder+filename, 'w') as f:
          f.write(ftb+'\n'+'train_size:'+str(X_train_c.shape[0])+'\n'+'test_size:'+str(preprocessed_X_test.shape[0]))
       
     # # finding the best weight for voting classifier
@@ -437,13 +437,14 @@ def deal_miss_nan(X, y):
         qs = Xcopy[f].quantile([0.25,0.75])
         itq = qs[0.75]-qs[0.25]
         
-        Bound = [qs[0.25]-1.5*qs[0.25], qs[0.75]+1.5*qs[0.75]]
+        Bound = [qs[0.25]-1.5*itq, qs[0.75]+1.5*itq]
         
         idx = Xcopy[ (Xcopy[f] < Bound[0]) | (Xcopy[f] > Bound[1] )].index  
         # Any observations that are more than 1.5 IQR below Q1 or more than 1.5 IQR above Q3 are considered outliers.         
         Xcopy.at[np.array(idx), f] = np.nan
     
     pr = get_nan_pr(Xcopy, cont_cols)
+    print(pr)
     fs_to_imp = [i[0] for i in pr if i[1]>0] # preprocessing的時候 impute       
     # 連續類別確認為數字    
     for i in cont_cols:
@@ -489,8 +490,8 @@ def remove_extreme(x, f, t):
 
 if __name__ == '__main__':
 
-#    data_root_folder = '/home/anpo/Desktop/pyscript/EDr_72/'
-    data_root_folder = '/Users/chengchichu/Desktop/py/EDr_72/'
+    data_root_folder = '/home/anpo/Desktop/pyscript/EDr_72/'
+    # data_root_folder = '/Users/chengchichu/Desktop/py/EDr_72/'
     df = pd.read_csv(data_root_folder+'CGRDER_20210512_v12.csv', encoding = 'big5')
     #df2 = pd.read_csv('/home/anpo/Desktop/pyscript/EDr_72/er72_processed_DATA_v10_ccs_converted.csv')
 
@@ -577,7 +578,7 @@ if __name__ == '__main__':
  
     # 極端值處理, 缺失, 刪除sample太少類別, 確認連續類別為數字      
     df_cat, y72, miss_feature = deal_miss_nan(df_cat, y72)
-    
+   
     
         # 同主訴的子群 或 其他子群 >65, los>mean, 
 #    complaint = '細分類'
@@ -595,7 +596,7 @@ if __name__ == '__main__':
     # strat_params['DPT2_3'] = 3
            
     # 主訴子模
-    sub_model = True
+    sub_model = False
     keys_to_remove = [] #
     strat_params = {}
     if sub_model:
@@ -645,29 +646,35 @@ if __name__ == '__main__':
         X_train_ = X_train.drop(col_to_drop,axis = 1)
         X_test_ = X_test.drop(col_to_drop,axis = 1)
         cols_copy = cols.copy()
+        miss_feature_copy = miss_feature.copy()
         for i in col_to_drop:
             cols_copy.pop(i)
-            miss_feature.remove(i)
+            miss_feature_copy.remove(i)
         
         assert(X_train_.shape[1] == len(cols_copy))
-        preprocessed_X, ytrain, preprocessed_X_test, encoding_head = preprocess(X_train_, y_train, X_test_, cols_copy, miss_feature) 
+        preprocessed_X, ytrain, preprocessed_X_test, encoding_head = preprocess(X_train_, y_train, X_test_, cols_copy, miss_feature_copy) 
             
     
         #======imbalanced 處理？
-    
-        n_seeds_num=4000     
-        if sub_model:                      
-           n_seeds_num = 50
+        balanced = True    
+        if balanced:
+            
+           if not sub_model:
+              n_seeds_num=4000
+           else:                
+              n_seeds_num = 50
+                              
            reX = np.array([0])
            while reX.shape[0] < preprocessed_X_test.shape[0]:            
                  undersample = OneSidedSelection(n_neighbors=1, n_seeds_S=n_seeds_num)
-                    #undersample = CondensedNearestNeighbour(n_neighbors=1, n_seeds_S=n_seeds_num)
-                    #undersample = NearMiss(version=1,n_neighbors = 3)                               
+                        #undersample = CondensedNearestNeighbour(n_neighbors=1, n_seeds_S=n_seeds_num)
+                        #undersample = NearMiss(version=1,n_neighbors = 3)                               
                  reX, rey = undersample.fit_resample(preprocessed_X, ytrain.values)         
                  n_seeds_num = n_seeds_num-10
-                       
+                           
            X_train_c = reX.copy()
            y_train_c = rey.copy()
+        
         else:
            X_train_c = preprocessed_X.copy()
            y_train_c = ytrain.values.copy()
@@ -676,7 +683,7 @@ if __name__ == '__main__':
 #           X_train_c = reX.copy()
 #           y_train_c = rey.copy()
         
-        run_models(X_train_c, y_train_c, preprocessed_X_test, y_test, key, encoding_head)
+        run_models(X_train_c, y_train_c, preprocessed_X_test, y_test, key, encoding_head, data_root_folder)
 
     # # save data for autoML
     # import pickle
