@@ -36,6 +36,7 @@ from sklearn.impute import SimpleImputer
 #from imblearn.under_sampling import NearMiss
 fconvert = np.vectorize(float)
 from tabulate import tabulate
+import xgboost as xgb
 
 ### Functions
 
@@ -145,35 +146,63 @@ def ml_model(clf,data_X,data_y):
     bst = models[np.argmax(aucs)]
     return bst, models, k_idx, aucs
 
-# def model_xgb(clf,data_X,data_y):
-#     # 10 fold
-#     kfold = KFold(10, True, 1)
-#     aucs = []
-#     models = []
-#     k_idx = []
-#     data_size = np.arange(0,data_X.shape[0])
-#     for train, test in kfold.split(data_size):
-#         it_idx = {}
-#         it_idx['train'] = train
-#         it_idx['test'] = test
-#         k_idx.append(it_idx)
-#         # 只對xtrain做bootstrapping
-#         xtrain = data_X[data_size[train],:]
-#         ytrain = data_y[data_size[train]]        
-#         xtrain, ytrain = bootstrap(xtrain, ytrain)
-#         xtest = data_X[data_size[test],:]
-#         ytest = data_y[data_size[test]]        
-#         # xgb evaluation set
-#         eval_set = [(xtrain,ytrain),(xtest,ytest)]
-#         # xgb early stopping
-#         model = clf.fit(xtrain, ytrain, early_stopping_rounds=5, eval_metric = "error", eval_set = eval_set)
-#         results = model.evals_result()    
-#         area_under_ROC = model_auc(model, xtest, ytest)
-#         aucs.append(area_under_ROC[0])
-#         models.append(model)        
-#     # selection model with best AUC
-#     bst = models[np.argmax(aucs)]
-#     return bst, models, k_idx, aucs, eval_set
+def model_xgb(clf,data_X,data_y):  
+     # use this step to balance the data, not sure it is necessary here
+     #xtrain, ytrain = bootstrap(xtrain, ytrain)
+     #切給 validation set, 10% of total, because train is 80%
+    X_train, X_test, y_train, y_test = train_test_split(data_X, data_y, test_size=1/8, random_state=40, stratify = data_y)            
+         # because I am tuning the hyperplane parameter, I don't need to do k fold here
+    dtrain = clf.DMatrix(X_train, label=y_train)
+    dtest = clf.DMatrix(X_test, label=y_test)
+         # I will fix this initially, see reference Woo Suk Hong and Andrew Talyor, 2019, thier supplementary text
+    params = {'eta':.3,
+              'subsample': 1,
+              'colsample_bytree': 1,
+              # Other parameters
+              'objective':'binary:logistic'}
+     
+#              'nrounds': 20,
+#              'nthread': 5}
+    params['eval_metric'] = 'auc'
+    num_boost_round = 999
+#    model = clf.train(params,dtrain,num_boost_round=num_boost_round,evals=[(dtest, "Test")], \
+#                       early_stopping_rounds=10)
+    #print("Best AUC: {:.2f} with {} rounds".format(model.best_score, model.best_iteration+1))
+    gridsearch_params = [ (max_depth, min_child_weight) for max_depth in range(9,12) for min_child_weight in range(5,8)]
+
+    # Define initial best params and MAE
+    max_auc = 0.5
+    best_params = None
+    for max_depth, min_child_weight in gridsearch_params:
+        print("CV with max_depth={}, min_child_weight={}".format(
+                                 max_depth,
+                                 min_child_weight))
+        # Update our parameters
+        params['max_depth'] = max_depth
+        params['min_child_weight'] = min_child_weight
+        # Run CV
+        cv_results = clf.cv(
+            params,
+            dtrain,
+            num_boost_round=num_boost_round,
+            seed=42,
+            nfold=10,
+            metrics={'auc'},
+            early_stopping_rounds=10
+        )
+        # Update best MAE
+        print(cv_results)
+        mean_auc = cv_results['test-auc-mean'].max()
+        boost_rounds = cv_results['test-auc-mean'].argmax()
+        print("\tAUC {} for {} rounds".format(mean_auc, boost_rounds))
+        
+        if mean_auc > max_auc:
+           max_auc = mean_auc
+           best_params = (max_depth, min_child_weight)
+            
+    print("Best params: {}, {}, AUC: {}".format(best_params[0], best_params[1], max_auc))
+#        
+# 
 
 def bootstrap(datax,datay):    
     # combined with bootstrap
@@ -308,73 +337,75 @@ def preprocess(X_train, y_train, X_test, cols, fs_to_imp):
     
 def run_models(X_train_c, y_train_c, preprocessed_X_test, y_test, model_strat, encoding_head, data_root_folder):
         ## 跑model      
-    clf1 = LogisticRegression(random_state=0, max_iter=5000)
-    print('running LG')
-    bst_lg, models, kidx, aucs_lg = ml_model(clf1, X_train_c, y_train_c)
+#    clf1 = LogisticRegression(random_state=0, max_iter=5000)
+#    print('running LG')
+#    bst_lg, models, kidx, aucs_lg = ml_model(clf1, X_train_c, y_train_c)
+#    
+#    # LG imp
+#    imp = pd.DataFrame(data = abs(bst_lg.coef_[0]),columns = ['lg_beta'])
+#    head = pd.DataFrame(data = encoding_head,columns = ['features'])
+#    imp2 = pd.concat([imp, head],axis = 1)
+#    print(imp2.sort_values(by=['lg_beta'],ascending = False))
+#    
+#    clf2 = RandomForestClassifier(random_state=0)  ## 隨機森林
+#    print('running RF')
+#    bst_rf, models, kidx, aucs_rf = ml_model(clf2, X_train_c, y_train_c)
+#    
+#    imp = pd.DataFrame(data = abs(bst_rf.feature_importances_),columns = ['rf_importance'])
+#    imp2 = pd.concat([imp, head],axis = 1)
+#    print(imp2.sort_values(by=['rf_importance'],ascending = False))
     
-    # LG imp
-    imp = pd.DataFrame(data = abs(bst_lg.coef_[0]),columns = ['lg_beta'])
-    head = pd.DataFrame(data = encoding_head,columns = ['features'])
-    imp2 = pd.concat([imp, head],axis = 1)
-    print(imp2.sort_values(by=['lg_beta'],ascending = False))
     
-    clf2 = RandomForestClassifier(random_state=0)  ## 隨機森林
-    print('running RF')
-    bst_rf, models, kidx, aucs_rf = ml_model(clf2, X_train_c, y_train_c)
-    
-    imp = pd.DataFrame(data = abs(bst_rf.feature_importances_),columns = ['rf_importance'])
-    imp2 = pd.concat([imp, head],axis = 1)
-    print(imp2.sort_values(by=['rf_importance'],ascending = False))
-    
-     # # clf3 = XGBClassifier(use_label_encoder=False, eval_metric="error")    
-     # # bst_xgb, models, kidx, aucs_xgb, eval_set = model_xgb(clf3, X_train_c, y_train_c)
-    
-    clf3 = XGBClassifier(use_label_encoder=False, eval_metric="error")    
+     # #這裡不直接用sklearn的方法 方便調參
+#    clf3 = XGBClassifier(use_label_encoder=False, eval_metric="error") #sklearn
+   # bst_xgb, models, kidx, aucs_xgb = ml_model(clf3, X_train_c, y_train_c)
     print('running XGB')
-    bst_xgb, models, kidx, aucs_xgb = ml_model(clf3, X_train_c, y_train_c)
-
-    clf4 = LinearSVC(random_state=0, tol=1e-5, dual=False, max_iter = 10000) 
-    print('running SVC')
-    bst_svm, models, kidx, aucs_svm = ml_model(clf4, X_train_c, y_train_c)
-
-    eclf1 = VotingClassifier(estimators=[('lg', clf1), ('rf', clf2), ('xgb', clf3)], voting='soft', weights = [2.5,5,2.5])
-    bst_eclf, models, kidx, aucs_eclf = ml_model(eclf1, X_train_c, y_train_c)
     
-    cm_lg, cp_lg = model_result(y_test, bst_lg, 'LG', preprocessed_X_test)
-    cm_rf, cp_rf = model_result(y_test, bst_rf, 'RF', preprocessed_X_test)
+    bst_xgb, models, kidx, aucs_xgb, eval_set = model_xgb(xgb, X_train_c, y_train_c)
+    
+
+#    clf4 = LinearSVC(random_state=0, tol=1e-5, dual=False, max_iter = 10000) 
+#    print('running SVC')
+#    bst_svm, models, kidx, aucs_svm = ml_model(clf4, X_train_c, y_train_c)
+
+#    eclf1 = VotingClassifier(estimators=[('lg', clf1), ('rf', clf2), ('xgb', clf3)], voting='soft', weights = [2.5,5,2.5])
+#    bst_eclf, models, kidx, aucs_eclf = ml_model(eclf1, X_train_c, y_train_c)
+    
+#    cm_lg, cp_lg = model_result(y_test, bst_lg, 'LG', preprocessed_X_test)
+#    cm_rf, cp_rf = model_result(y_test, bst_rf, 'RF', preprocessed_X_test)
     cm_xg, cp_xg = model_result(y_test, bst_xgb, 'XGB', preprocessed_X_test)
-    cm_sv, cp_sv = model_result(y_test, bst_svm, 'SVM', preprocessed_X_test)
-    cm_ec, cp_ec = model_result(y_test, bst_eclf, 'ECLF', preprocessed_X_test)
+#    cm_sv, cp_sv = model_result(y_test, bst_svm, 'SVM', preprocessed_X_test)
+#    cm_ec, cp_ec = model_result(y_test, bst_eclf, 'ECLF', preprocessed_X_test)
 
    # metrics.plot_roc_curve(bst_lg, preprocessed_X_test, y_test)
    # metrics.plot_roc_curve(bst_rf, preprocessed_X_test, y_test) 
    # metrics.plot_roc_curve(bst_xgb, preprocessed_X_test, y_test) 
    # metrics.plot_roc_curve(bst_eclf, preprocessed_X_test, y_test) 
    
-    lg_auc, lgprc = model_auc(bst_lg, preprocessed_X_test, y_test)
-    rf_auc, rfprc = model_auc(bst_rf, preprocessed_X_test, y_test)
+#    lg_auc, lgprc = model_auc(bst_lg, preprocessed_X_test, y_test)
+#    rf_auc, rfprc = model_auc(bst_rf, preprocessed_X_test, y_test)
     xgb_auc, xgbprc = model_auc(bst_xgb, preprocessed_X_test, y_test)
-    svm_auc, svmprc = model_auc(bst_svm, preprocessed_X_test, y_test)
-    ec_auc, ecprc = model_auc(bst_eclf, preprocessed_X_test, y_test)
+#    svm_auc, svmprc = model_auc(bst_svm, preprocessed_X_test, y_test)
+#    ec_auc, ecprc = model_auc(bst_eclf, preprocessed_X_test, y_test)
     
     #if not model_strat:
-    print(model_strat)
-    print('LG')
-    tb1 = table_r(cp_lg,cm_lg,lg_auc)
-    print('RF')
-    tb2 = table_r(cp_rf,cm_rf,rf_auc)
+#    print(model_strat)
+#    print('LG')
+#    tb1 = table_r(cp_lg,cm_lg,lg_auc)
+#    print('RF')
+#    tb2 = table_r(cp_rf,cm_rf,rf_auc)
     print('XGB')
     tb3 = table_r(cp_xg,cm_xg,xgb_auc)
-    print('SVM')
-    tb4 = table_r(cp_sv,cm_sv,svm_auc)
-    print('EC')
-    tb5 = table_r(cp_ec,cm_ec,ec_auc)
+#    print('SVM')
+#    tb4 = table_r(cp_sv,cm_sv,svm_auc)
+#    print('EC')
+#    tb5 = table_r(cp_ec,cm_ec,ec_auc)
     
-    filename = 'M'+model_strat+'result.txt'
-    ftb = 'LG' + '\n' + tb1 + '\n' +'RF' + '\n' + tb2 + '\n' +'XGB' + '\n' + tb3 + '\n' +'SVM' + '\n' + tb4 + '\n' +'EC' + '\n' + tb5 + '\n'
+#    filename = 'M'+model_strat+'result.txt'
+#    ftb = 'LG' + '\n' + tb1 + '\n' +'RF' + '\n' + tb2 + '\n' +'XGB' + '\n' + tb3 + '\n' +'SVM' + '\n' + tb4 + '\n' +'EC' + '\n' + tb5 + '\n'
            
-    with open(data_root_folder+filename, 'w') as f:
-         f.write(ftb+'\n'+'train_size:'+str(X_train_c.shape[0])+'\n'+'test_size:'+str(preprocessed_X_test.shape[0]))
+#    with open(data_root_folder+filename, 'w') as f:
+#         f.write(ftb+'\n'+'train_size:'+str(X_train_c.shape[0])+'\n'+'test_size:'+str(preprocessed_X_test.shape[0]))
       
     # # finding the best weight for voting classifier
     # weights_comb = [[3,3.5,3.5],[5,2.5,2.5],[7,1.5,1.5],[9,0.5,0.5]]
@@ -490,8 +521,8 @@ def remove_extreme(x, f, t):
 
 if __name__ == '__main__':
 
-    data_root_folder = '/home/anpo/Desktop/pyscript/EDr_72/'
-    # data_root_folder = '/Users/chengchichu/Desktop/py/EDr_72/'
+    #data_root_folder = '/home/anpo/Desktop/pyscript/EDr_72/'
+    data_root_folder = '/Users/chengchichu/Desktop/py/EDr_72/'
     df = pd.read_csv(data_root_folder+'CGRDER_20210512_v12.csv', encoding = 'big5')
     #df2 = pd.read_csv('/home/anpo/Desktop/pyscript/EDr_72/er72_processed_DATA_v10_ccs_converted.csv')
 
@@ -723,9 +754,28 @@ if __name__ == '__main__':
 
 
 
+     # 10 fold
+#     kfold = KFold(10, True, 1)
+#     aucs = []
+#     models = []
+#     k_idx = []
+#     data_size = np.arange(0,data_X.shape[0])
+#     for train, test in kfold.split(data_size):
+#         it_idx = {}
+#         it_idx['train'] = train
+#         it_idx['test'] = test
+#         k_idx.append(it_idx)
+#         # 只對xtrain做bootstrapping
+#         xtrain = data_X[data_size[train],:]
+#         ytrain = data_y[data_size[train]] 
 
-
-
+#         xtest = data_X[data_size[test],:]
+#         ytest = data_y[data_size[test]]        
+         # xgb evaluation set
+#         eval_set = [(xtrain,ytrain),(xtest,ytest)]
+#         # xgb early stopping
+#         model = clf.fit(xtrain, ytrain, early_stopping_rounds=5, eval_metric = "error", eval_set = eval_set)
+         # 
                
 
 
