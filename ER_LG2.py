@@ -376,23 +376,23 @@ def preprocess(X_train, y_train, X_test, cols, fs_to_imp):
     
 def run_models(X_train_c, y_train_c, preprocessed_X_test, y_test, model_strat, encoding_head, data_root_folder):
         ## 跑model      
-    # clf1 = LogisticRegression(random_state=0, max_iter=5000)
-    # print('running LG')
-    # bst_lg, models, kidx, aucs_lg = ml_model(clf1, X_train_c, y_train_c)
+     clf1 = LogisticRegression(random_state=0, max_iter=5000)
+     print('running LG')
+     bst_lg, models, kidx, aucs_lg = ml_model(clf1, X_train_c, y_train_c)
     
-    # # LG imp
-    # imp = pd.DataFrame(data = abs(bst_lg.coef_[0]),columns = ['lg_beta'])
-    # head = pd.DataFrame(data = encoding_head,columns = ['features'])
-    # imp2 = pd.concat([imp, head],axis = 1)
-    # print(imp2.sort_values(by=['lg_beta'],ascending = False))
+     # LG imp
+     imp = pd.DataFrame(data = abs(bst_lg.coef_[0]),columns = ['lg_beta'])
+     head = pd.DataFrame(data = encoding_head,columns = ['features'])
+     imp2 = pd.concat([imp, head],axis = 1)
+     print(imp2.sort_values(by=['lg_beta'],ascending = False))
     
-    # clf2 = RandomForestClassifier(random_state=0)  ## 隨機森林
-    # print('running RF')
-    # bst_rf, models, kidx, aucs_rf = ml_model(clf2, X_train_c, y_train_c)
+     clf2 = RandomForestClassifier(random_state=0)  ## 隨機森林
+     print('running RF')
+     bst_rf, models, kidx, aucs_rf = ml_model(clf2, X_train_c, y_train_c)
     
-    # imp = pd.DataFrame(data = abs(bst_rf.feature_importances_),columns = ['rf_importance'])
-    # imp2 = pd.concat([imp, head],axis = 1)
-    # print(imp2.sort_values(by=['rf_importance'],ascending = False))
+     imp = pd.DataFrame(data = abs(bst_rf.feature_importances_),columns = ['rf_importance'])
+     imp2 = pd.concat([imp, head],axis = 1)
+     print(imp2.sort_values(by=['rf_importance'],ascending = False))
     
     
      # #這裡不直接用sklearn的方法 方便調參
@@ -403,23 +403,23 @@ def run_models(X_train_c, y_train_c, preprocessed_X_test, y_test, model_strat, e
     # 
     
    
-    # clf4 = LinearSVC(random_state=0, tol=1e-5, dual=False, max_iter = 10000) 
-    # print('running SVC')
-    # bst_svm, models, kidx, aucs_svm = ml_model(clf4, X_train_c, y_train_c)
+    clf4 = LinearSVC(random_state=0, tol=1e-5, dual=False, max_iter = 10000) 
+    print('running SVC')
+    bst_svm, models, kidx, aucs_svm = ml_model(clf4, X_train_c, y_train_c)
 
-    # eclf1 = VotingClassifier(estimators=[('lg', clf1), ('rf', clf2), ('xgb', clf3)], voting='soft', weights = [2.5,5,2.5])
-    # bst_eclf, models, kidx, aucs_eclf = ml_model(eclf1, X_train_c, y_train_c)
+    eclf1 = VotingClassifier(estimators=[('lg', clf1), ('rf', clf2), ('xgb', clf3)], voting='soft', weights = [2.5,5,2.5])
+    bst_eclf, models, kidx, aucs_eclf = ml_model(eclf1, X_train_c, y_train_c)
     
-    # cm_lg, cp_lg = model_result(y_test, bst_lg, 'LG', preprocessed_X_test)
-    # cm_rf, cp_rf = model_result(y_test, bst_rf, 'RF', preprocessed_X_test)
+    cm_lg, cp_lg = model_result(y_test, bst_lg, 'LG', preprocessed_X_test)
+    cm_rf, cp_rf = model_result(y_test, bst_rf, 'RF', preprocessed_X_test)
     cm_xg, cp_xg = model_result(y_test, bst_xgb, 'XGB', preprocessed_X_test)
-    # cm_sv, cp_sv = model_result(y_test, bst_svm, 'SVM', preprocessed_X_test)
-    # cm_ec, cp_ec = model_result(y_test, bst_eclf, 'ECLF', preprocessed_X_test)
+    cm_sv, cp_sv = model_result(y_test, bst_svm, 'SVM', preprocessed_X_test)
+    cm_ec, cp_ec = model_result(y_test, bst_eclf, 'ECLF', preprocessed_X_test)
 
    # metrics.plot_roc_curve(bst_lg, preprocessed_X_test, y_test)
 
-    # lg_auc, lgprc = model_auc(bst_lg, preprocessed_X_test, y_test)
-    # rf_auc, rfprc = model_auc(bst_rf, preprocessed_X_test, y_test)
+    lg_auc, lgprc = model_auc(bst_lg, preprocessed_X_test, y_test)
+    rf_auc, rfprc = model_auc(bst_rf, preprocessed_X_test, y_test)
    
      # xgb test part 跟別人不同分開寫
     dtest = xgb.DMatrix(preprocessed_X_test , label = y_test)
@@ -427,27 +427,27 @@ def run_models(X_train_c, y_train_c, preprocessed_X_test, y_test, model_strat, e
     fpr, tpr, _ = roc_curve(y_test, yscore)
     xgb_auc = auc(fpr, tpr)
         
-    # svm_auc, svmprc = model_auc(bst_svm, preprocessed_X_test, y_test)
-    # ec_auc, ecprc = model_auc(bst_eclf, preprocessed_X_test, y_test)
+    svm_auc, svmprc = model_auc(bst_svm, preprocessed_X_test, y_test)
+    ec_auc, ecprc = model_auc(bst_eclf, preprocessed_X_test, y_test)
     
     # if not model_strat:
     print(model_strat)
-    # print('LG')
-    # tb1 = table_r(cp_lg,cm_lg,lg_auc)
-    # print('RF')
-    # tb2 = table_r(cp_rf,cm_rf,rf_auc)
+    print('LG')
+    tb1 = table_r(cp_lg,cm_lg,lg_auc)
+    print('RF')
+    tb2 = table_r(cp_rf,cm_rf,rf_auc)
     print('XGB')
     tb3 = table_r(cp_xg,cm_xg,xgb_auc)
-    # print('SVM')
-    # tb4 = table_r(cp_sv,cm_sv,svm_auc)
-    # print('EC')
-    # tb5 = table_r(cp_ec,cm_ec,ec_auc)
+    print('SVM')
+    tb4 = table_r(cp_sv,cm_sv,svm_auc)
+    print('EC')
+    tb5 = table_r(cp_ec,cm_ec,ec_auc)
      
-    # filename = 'M'+model_strat+'result.txt'
-    # ftb = 'LG' + '\n' + tb1 + '\n' +'RF' + '\n' + tb2 + '\n' +'XGB' + '\n' + tb3 + '\n' +'SVM' + '\n' + tb4 + '\n' +'EC' + '\n' + tb5 + '\n'
+    filename = 'M'+model_strat+'result.txt'
+    ftb = 'LG' + '\n' + tb1 + '\n' +'RF' + '\n' + tb2 + '\n' +'XGB' + '\n' + tb3 + '\n' +'SVM' + '\n' + tb4 + '\n' +'EC' + '\n' + tb5 + '\n'
             
-    # with open(data_root_folder+filename, 'w') as f:
-    #      f.write(ftb+'\n'+'train_size:'+str(X_train_c.shape[0])+'\n'+'test_size:'+str(preprocessed_X_test.shape[0]))
+    with open(data_root_folder+filename, 'w') as f:
+         f.write(ftb+'\n'+'train_size:'+str(X_train_c.shape[0])+'\n'+'test_size:'+str(preprocessed_X_test.shape[0]))
       
    ############################### 
     
@@ -491,8 +491,9 @@ def deal_miss_nan(X, y):
     cont_cols = ['ER_LOS','age1','TMP','PULSE','BPS','BPB','Dr_VSy','WEIGHT','SBP','DBP','Bun_value', \
                  'CRP_value','Lactate_value','Procalcitonin_value','Creatine_value','Hb_value', \
                  'Hct_value','RBC_value','WBC_value','BRTCNT','SPAO2','DD_visit_30','DD_visit_365', 'exam_TOTAL', \
-                 'lab_TOTAL','ER_visit_30','ER_visit_365']
-    
+                 'lab_TOTAL','ER_visit_30','ER_visit_365','sugar_value','Xrayh_T','MRIh_T','CTh_T', \
+                 'in_SPAO2', 'in_BRTCNT','in_BPS','in_BPB','in_TMP','in_PULSE','SBP1','DBP1','SBP2','DBP2']
+        
     # 移除明顯極端值
     #examining
     #df_cat['PULSE'].value_counts().sort_index()
@@ -501,13 +502,23 @@ def deal_miss_nan(X, y):
     Xcopy = remove_extreme(Xcopy, 'BPS', 0) 
     Xcopy = remove_extreme(Xcopy, 'BPB', 0) 
     Xcopy = remove_extreme(Xcopy, 'WEIGHT', [10, 400]) 
-    Xcopy = remove_extreme(Xcopy, 'SBP', [10, 400]) 
-    Xcopy = remove_extreme(Xcopy, 'DBP', [10, 400])
+    Xcopy = remove_extreme(Xcopy, 'SBP1', [10, 400]) 
+    Xcopy = remove_extreme(Xcopy, 'DBP1', [10, 400])
     Xcopy = remove_extreme(Xcopy, 'BRTCNT', 0) 
     Xcopy = remove_extreme(Xcopy, 'SPAO2', 10) 
-
-    fs = ['TMP','PULSE','BPS','BPB','WEIGHT','SBP','DBP','BRTCNT','SPAO2']
     
+    Xcopy = remove_extreme(Xcopy, 'in_TMP', [20, 45])
+    Xcopy = remove_extreme(Xcopy, 'in_PULSE', [10, 250]) 
+    Xcopy = remove_extreme(Xcopy, 'in_BPS', 0) 
+    Xcopy = remove_extreme(Xcopy, 'in_BPB', 0) 
+    Xcopy = remove_extreme(Xcopy, 'SBP2', [10, 400]) 
+    Xcopy = remove_extreme(Xcopy, 'DBP2', [10, 400])
+    Xcopy = remove_extreme(Xcopy, 'in_BRTCNT', 0) 
+    Xcopy = remove_extreme(Xcopy, 'in_SPAO2', 10)
+
+    fs = ['TMP','PULSE','BPS','BPB','WEIGHT','SBP1','DBP1','BRTCNT','SPAO2', \
+          'in_TMP','in_PULSE','in_BPS','in_BPB','SBP2','DBP2','in_BRTCNT','in_SPAO2'] # 檢驗值未考慮移除極端值
+        
     for f in fs:
         qs = Xcopy[f].quantile([0.25,0.75])
         itq = qs[0.75]-qs[0.25]
@@ -527,7 +538,8 @@ def deal_miss_nan(X, y):
 
     # 不連續類別之缺失
     cats = ['DPT2','SEX','ANISICCLSF_C','INTY','week','weekday','indate_time_gr','GCSE','GCSV','GCSM', \
-            'indate_month','ANISICMIGD','ANISICMIGD_1','ANISICMIGD_3','ct','MRI','xray','EKG','Echo'] 
+            'indate_month','ANISICMIGD','ANISICMIGD_1','ANISICMIGD_3','ct','MRI','xray','EKG','Echo', \
+            'in_GCSE','in_GCSV','in_GCSM','in_ANISICCLSF_C','in_ANISICMIGD','in_ANISICMIGD_1','in_ANISICMIGD_3'] 
     for i in cats:
         print(sum(Xcopy[i].isna()))     
     
@@ -565,9 +577,9 @@ def remove_extreme(x, f, t):
 
 if __name__ == '__main__':
 
-    data_root_folder = '/home/anpo/Desktop/pyscript/EDr_72/'
-    # data_root_folder = '/Users/chengchichu/Desktop/py/EDr_72/'
-    df = pd.read_csv(data_root_folder+'CGRDER_20210512_v12.csv', encoding = 'big5')
+    #data_root_folder = '/home/anpo/Desktop/pyscript/EDr_72/'
+    data_root_folder = '/Users/chengchichu/Desktop/py/EDr_72/'
+    df = pd.read_csv(data_root_folder+'CGRDER_20210604_v14.csv', encoding = 'big5')
     #df2 = pd.read_csv('/home/anpo/Desktop/pyscript/EDr_72/er72_processed_DATA_v10_ccs_converted.csv')
 
     cols = {}
@@ -598,6 +610,16 @@ if __name__ == '__main__':
     cols['ANISICMIGD_1'] = 1
     cols['ANISICMIGD_3'] = 1
     
+    cols['Free_typing'] = 2
+    cols['Panendoscope'] = 2
+    cols['Buscopan'] = 2
+    cols['Ketorolac'] = 2
+    cols['Primperan'] = 2
+    cols['Novamin'] = 2
+    cols['Codeine'] = 2
+    cols['Morphine'] = 2
+    cols['Nalbuphine'] = 2
+    
     cols['ER_LOS'] = 1
     cols['age1'] = 1
     cols['ER_visit_30'] = 1 # 
@@ -608,8 +630,6 @@ if __name__ == '__main__':
     cols['BPB'] = 1
     cols['Dr_VSy'] = 1
     cols['WEIGHT'] = 1
-    cols['SBP'] = 1
-    cols['DBP'] = 1
     cols['Bun_value'] = 1
     cols['CRP_value'] = 1
     cols['Lactate_value'] = 1
@@ -620,6 +640,28 @@ if __name__ == '__main__':
     cols['RBC_value'] = 1
     cols['WBC_value'] = 1
     
+    cols['sugar_value'] = 1
+    cols['Xrayh_T'] = 1
+    cols['MRIh_T'] = 1
+    cols['CTh_T'] = 1
+    cols['in_SPAO2'] = 1
+    cols['in_BRTCNT'] = 1
+    cols['in_GCSE'] = 1
+    cols['in_GCSV'] = 1
+    cols['in_GCSM'] = 1
+    cols['in_BPS'] = 1
+    cols['in_BPB'] = 1
+    cols['in_TMP'] = 1
+    cols['in_PULSE'] = 1
+    cols['in_ANISICCLSF_C'] = 1
+    cols['in_ANISICMIGD'] = 1
+    cols['in_ANISICMIGD_1'] = 1
+    cols['in_ANISICMIGD_3'] = 1
+    cols['SBP1'] = 1
+    cols['DBP1'] = 1
+    cols['SBP2'] = 1
+    cols['DBP2'] = 1
+     
 #    cols['blood_lab'] # 血液檢查, 是否有其他項
 #    cols['urine_lab'] # 尿液檢查, 是否有其他項
     #cols['WBC_rslt'] = 1 檢驗數值之類別化1,0,-1(缺失)
@@ -749,28 +791,28 @@ if __name__ == '__main__':
 #           y_train_c = rey.copy()
         
         # 就跑模型吧
-        # run_models(X_train_c, y_train_c, preprocessed_X_test, y_test, key, encoding_head, data_root_folder)
+        run_models(X_train_c, y_train_c, preprocessed_X_test, y_test, key, encoding_head, data_root_folder)
 
         # tune XGB hyperparameter, 利用bayesian opt,  
         
-        space={'max_depth': hp.quniform("max_depth", 3, 18, 1),
-        'gamma': hp.uniform ('gamma', 1,9),
-        'reg_alpha' : hp.quniform('reg_alpha', 40,180,1),
-        'reg_lambda' : hp.uniform('reg_lambda', 0,1),
-        'colsample_bytree' : hp.uniform('colsample_bytree', 0.5,1),
-        'min_child_weight' : hp.quniform('min_child_weight', 0, 10, 1),
-        'n_estimators': 180,
-        'seed': 0
-        }
-         
-        train_x, val_x, train_y, val_y = train_test_split(X_train_c, y_train_c, test_size=1/8, random_state=40, stratify = y_train_c)   
-        
-        # define objective function
-        best_hyperparams = fmin(fn = xgb_objective,
-                        space = space,
-                        algo = tpe.suggest,
-                        max_evals = 100,
-                        trials = Trials())
+#        space={'max_depth': hp.quniform("max_depth", 3, 18, 1),
+#        'gamma': hp.uniform ('gamma', 1,9),
+#        'reg_alpha' : hp.quniform('reg_alpha', 40,180,1),
+#        'reg_lambda' : hp.uniform('reg_lambda', 0,1),
+#        'colsample_bytree' : hp.uniform('colsample_bytree', 0.5,1),
+#        'min_child_weight' : hp.quniform('min_child_weight', 0, 10, 1),
+#        'n_estimators': 180,
+#        'seed': 0
+#        }
+#         
+#        train_x, val_x, train_y, val_y = train_test_split(X_train_c, y_train_c, test_size=1/8, random_state=40, stratify = y_train_c)   
+#        
+#        # define objective function
+#        best_hyperparams = fmin(fn = xgb_objective,
+#                        space = space,
+#                        algo = tpe.suggest,
+#                        max_evals = 100,
+#                        trials = Trials())
 
 # end of the code
 # NOTE =============================================================================================
