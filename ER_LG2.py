@@ -111,13 +111,13 @@ def assert_number(data, lab):
 
 def model_auc(model, preprocessed_X, y_true):
     try: 
+       y_score = model.predict_proba(preprocessed_X)[:,1]
+    except:       
        y_score = model.decision_function(preprocessed_X)   
-    except:
-       y_score = model.predict_proba(preprocessed_X)[:,1]  
     fpr, tpr, _ = roc_curve(y_true, y_score)
     roc_auc = auc(fpr, tpr)
     auprc = average_precision_score(y_true, y_score)
-    return roc_auc, auprc
+    return roc_auc, auprc, y_score
 
 def ml_model(clf,data_X,data_y):
     # 10 fold        
@@ -145,7 +145,7 @@ def ml_model(clf,data_X,data_y):
     bst = models[np.argmax(aucs)]
     return bst, models, k_idx, aucs
 
-def model_xgb(clf,data_X,data_y):  
+def model_xgb(clf,data_X,data_y, params):  
      # use this step to balance the data, not sure it is necessary here
      #xtrain, ytrain = bootstrap(xtrain, ytrain)
      #切給 validation set, 10% of total, because train is 80%
@@ -154,25 +154,38 @@ def model_xgb(clf,data_X,data_y):
     dtrain = clf.DMatrix(X_train, label=y_train)
     dval = clf.DMatrix(X_test, label=y_test)
          # I will fix this initially, see reference Woo Suk Hong and Andrew Talyor, 2019, thier supplementary text
-    params = {'objective':'binary:logistic'}
+    params['objective'] = 'binary:logistic'
 #              'nrounds': 20,
 #              'nthread': 5}
     params['eval_metric'] = 'auc'
-    params['max_depth'] = 3
-    params['min_child_weight'] = 7
+    # params['max_depth'] = 3
+    # params['max_depth'] = 8
+    # params['min_child_weight'] = 7
+    # params['min_child_weight'] = 4
     params['subsample'] = 1
-    params['colsample_bytree'] = 0.51
+    # params['colsample_bytree'] = 0.51
+    # params['colsample_bytree'] = 0.96
     params['eta'] = 0.05
-    params['gamma'] = 1.02
-    params['reg_alpha'] = 60
-    params['reg_lambda'] = 0.66
+    # params['gamma'] = 1.02
+    # params['gamma'] = 2.5
+    # params['reg_alpha'] = 60
+    # params['reg_alpha'] = 158
+    # params['reg_lambda'] = 0.66
+    # params['reg_lambda'] = 0.54
     num_boost_round = 999
+    
+    clf2 = clf.XGBClassifier(**params, use_label_encoder=False)
     # clf.train(params,dtrain,num_boost_round=num_boost_round,evals=[(dtest, "Test")], \
     #                    early_stopping_rounds=10)
     model = clf.train(params,dtrain,num_boost_round=num_boost_round,evals=[(dval, "Test")], \
                        early_stopping_rounds=10)
 
+    # another model for voting 
+    evaluation = [( X_train, y_train), ( X_test, y_test)]
     
+    model2 = clf2.fit(X_train, y_train,
+            eval_set=evaluation, eval_metric="auc",
+            early_stopping_rounds=10,verbose=False)
     
     # print("Best AUC: {:.2f} with {} rounds".format(model.best_score, model.best_iteration+1))
     # gridsearch_params = [ (max_depth, min_child_weight) for max_depth in range(9,12) for min_child_weight in range(5,8)]
@@ -205,7 +218,7 @@ def model_xgb(clf,data_X,data_y):
     #        best_params = eta
             
     # print("Best params: {}, {}, AUC: {}".format(best_params[0], best_params[1], max_auc))
-    return model
+    return model, model2
 
 def xgb_objective(space):
     clf=xgb.XGBClassifier(
@@ -376,30 +389,30 @@ def preprocess(X_train, y_train, X_test, cols, fs_to_imp):
     
 def run_models(X_train_c, y_train_c, preprocessed_X_test, y_test, model_strat, encoding_head, data_root_folder):
         ## 跑model      
-     clf1 = LogisticRegression(random_state=0, max_iter=5000)
-     print('running LG')
-     bst_lg, models, kidx, aucs_lg = ml_model(clf1, X_train_c, y_train_c)
+    clf1 = LogisticRegression(random_state=0, max_iter=5000)
+    print('running LG')
+    bst_lg, models, kidx, aucs_lg = ml_model(clf1, X_train_c, y_train_c)
     
      # LG imp
-     imp = pd.DataFrame(data = abs(bst_lg.coef_[0]),columns = ['lg_beta'])
-     head = pd.DataFrame(data = encoding_head,columns = ['features'])
-     imp2 = pd.concat([imp, head],axis = 1)
-     print(imp2.sort_values(by=['lg_beta'],ascending = False))
+    imp = pd.DataFrame(data = abs(bst_lg.coef_[0]),columns = ['lg_beta'])
+    head = pd.DataFrame(data = encoding_head,columns = ['features'])
+    imp2 = pd.concat([imp, head],axis = 1)
+    print(imp2.sort_values(by=['lg_beta'],ascending = False))
     
-     clf2 = RandomForestClassifier(random_state=0)  ## 隨機森林
-     print('running RF')
-     bst_rf, models, kidx, aucs_rf = ml_model(clf2, X_train_c, y_train_c)
+    clf2 = RandomForestClassifier(random_state=0)  ## 隨機森林
+    print('running RF')
+    bst_rf, models, kidx, aucs_rf = ml_model(clf2, X_train_c, y_train_c)
     
-     imp = pd.DataFrame(data = abs(bst_rf.feature_importances_),columns = ['rf_importance'])
-     imp2 = pd.concat([imp, head],axis = 1)
-     print(imp2.sort_values(by=['rf_importance'],ascending = False))
+    imp = pd.DataFrame(data = abs(bst_rf.feature_importances_),columns = ['rf_importance'])
+    imp2 = pd.concat([imp, head],axis = 1)
+    print(imp2.sort_values(by=['rf_importance'],ascending = False))
     
     
      # #這裡不直接用sklearn的方法 方便調參
-    clf3 = XGBClassifier(use_label_encoder=False, eval_metric="error") #sklearn
+    # clf3 = XGBClassifier(use_label_encoder=False, eval_metric="auc") #sklearn
    # bst_xgb, models, kidx, aucs_xgb = ml_model(clf3, X_train_c, y_train_c)
     print('running XGB')    
-    bst_xgb = model_xgb(xgb, X_train_c, y_train_c)
+    bst_xgb, bst_xgb2 = model_xgb(xgb, X_train_c, y_train_c, best_hyperparams)
     # 
     
    
@@ -407,7 +420,7 @@ def run_models(X_train_c, y_train_c, preprocessed_X_test, y_test, model_strat, e
     print('running SVC')
     bst_svm, models, kidx, aucs_svm = ml_model(clf4, X_train_c, y_train_c)
 
-    eclf1 = VotingClassifier(estimators=[('lg', clf1), ('rf', clf2), ('xgb', clf3)], voting='soft', weights = [2.5,5,2.5])
+    eclf1 = VotingClassifier(estimators=[('lg', bst_lg), ('rf', bst_rf), ('xgb', bst_xgb2)], voting='soft', weights = [2.5,5,5])
     bst_eclf, models, kidx, aucs_eclf = ml_model(eclf1, X_train_c, y_train_c)
     
     cm_lg, cp_lg = model_result(y_test, bst_lg, 'LG', preprocessed_X_test)
@@ -418,17 +431,17 @@ def run_models(X_train_c, y_train_c, preprocessed_X_test, y_test, model_strat, e
 
    # metrics.plot_roc_curve(bst_lg, preprocessed_X_test, y_test)
 
-    lg_auc, lgprc = model_auc(bst_lg, preprocessed_X_test, y_test)
-    rf_auc, rfprc = model_auc(bst_rf, preprocessed_X_test, y_test)
+    lg_auc, lgprc, lg_yscore = model_auc(bst_lg, preprocessed_X_test, y_test)
+    rf_auc, rfprc, rf_yscore = model_auc(bst_rf, preprocessed_X_test, y_test)
    
      # xgb test part 跟別人不同分開寫
     dtest = xgb.DMatrix(preprocessed_X_test , label = y_test)
-    yscore = bst_xgb.predict(dtest)
-    fpr, tpr, _ = roc_curve(y_test, yscore)
+    xgb_yscore = bst_xgb.predict(dtest)
+    fpr, tpr, _ = roc_curve(y_test, xgb_yscore)
     xgb_auc = auc(fpr, tpr)
         
-    svm_auc, svmprc = model_auc(bst_svm, preprocessed_X_test, y_test)
-    ec_auc, ecprc = model_auc(bst_eclf, preprocessed_X_test, y_test)
+    svm_auc, svmprc, svm_yscore = model_auc(bst_svm, preprocessed_X_test, y_test)
+    ec_auc, ecprc, ec_yscore = model_auc(bst_eclf, preprocessed_X_test, y_test)
     
     # if not model_strat:
     print(model_strat)
@@ -488,7 +501,7 @@ def deal_miss_nan(X, y):
     ycopy = y.copy()
 
     # 極端值處理 連續類別之缺失
-    cont_cols = ['ER_LOS','age1','TMP','PULSE','BPS','BPB','Dr_VSy','WEIGHT','SBP','DBP','Bun_value', \
+    cont_cols = ['ER_LOS','age1','TMP','PULSE','BPS','BPB','Dr_VSy','WEIGHT','Bun_value', \
                  'CRP_value','Lactate_value','Procalcitonin_value','Creatine_value','Hb_value', \
                  'Hct_value','RBC_value','WBC_value','BRTCNT','SPAO2','DD_visit_30','DD_visit_365', 'exam_TOTAL', \
                  'lab_TOTAL','ER_visit_30','ER_visit_365','sugar_value','Xrayh_T','MRIh_T','CTh_T', \
@@ -539,15 +552,18 @@ def deal_miss_nan(X, y):
     # 不連續類別之缺失
     cats = ['DPT2','SEX','ANISICCLSF_C','INTY','week','weekday','indate_time_gr','GCSE','GCSV','GCSM', \
             'indate_month','ANISICMIGD','ANISICMIGD_1','ANISICMIGD_3','ct','MRI','xray','EKG','Echo', \
-            'in_GCSE','in_GCSV','in_GCSM','in_ANISICCLSF_C','in_ANISICMIGD','in_ANISICMIGD_1','in_ANISICMIGD_3'] 
+            'in_GCSE','in_GCSV','in_GCSM','in_ANISICCLSF_C','in_ANISICMIGD','in_ANISICMIGD_1','in_ANISICMIGD_3'] #, \
+            # 'ICD3'] 
     for i in cats:
         print(sum(Xcopy[i].isna()))     
     
     # 缺失新增類別
     Xcopy['INTY'].fillna(value=10, inplace=True)
+    # Xcopy['ICD3'].fillna(value='noICD', inplace=True)
     
     # 對類別變項檢查, 如果只有<5 sample移除, 無法平均的分給train and test    
-    cat_cols = ['INTY']   
+    # cat_cols = ['INTY', 'ICD3']   
+    cat_cols = ['INTY'] 
     row_idx = np.empty(0).astype(int)    
     for i in cat_cols:
         table = Xcopy[i].value_counts()
@@ -577,9 +593,9 @@ def remove_extreme(x, f, t):
 
 if __name__ == '__main__':
 
-    #data_root_folder = '/home/anpo/Desktop/pyscript/EDr_72/'
-    data_root_folder = '/Users/chengchichu/Desktop/py/EDr_72/'
-    df = pd.read_csv(data_root_folder+'CGRDER_20210604_v14.csv', encoding = 'big5')
+    data_root_folder = '/home/anpo/Desktop/pyscript/EDr_72/'
+    #data_root_folder = '/Users/chengchichu/Desktop/py/EDr_72/'
+    df = pd.read_csv(data_root_folder+'CGRDER_20210618_v15.csv', encoding = 'big5')
     #df2 = pd.read_csv('/home/anpo/Desktop/pyscript/EDr_72/er72_processed_DATA_v10_ccs_converted.csv')
 
     cols = {}
@@ -619,6 +635,7 @@ if __name__ == '__main__':
     cols['Codeine'] = 2
     cols['Morphine'] = 2
     cols['Nalbuphine'] = 2
+    # cols['ICD3'] = 0
     
     cols['ER_LOS'] = 1
     cols['age1'] = 1
@@ -673,9 +690,9 @@ if __name__ == '__main__':
     # # make sure you get ccs right in CCS_distribution.py
     # index admission的主診斷
     with open(data_root_folder+'ccs_distri.txt', 'r') as f:
-         ccs_ids = f.read().splitlines()       
-         for i in range(len(ccs_ids)):
-             cols[ccs_ids[i]] = 2
+          ccs_ids = f.read().splitlines()       
+          for i in range(len(ccs_ids)):
+              cols[ccs_ids[i]] = 2
        
     # # 過去兩年病史
     with open(data_root_folder+'ccsh_distri.txt', 'r') as f:
@@ -691,7 +708,10 @@ if __name__ == '__main__':
                      
     column_keys = cols.keys()
     df_cat = df[column_keys]
-    y72 = df['re72'] 
+    # y72 = df['re72'] 
+    
+    bad_outcome = df['next_DEAD'] | df['next_ICU']
+    y72 = df['next_adm'] & df['re72']
  
     # 極端值處理, 確認連續類別為數字      
     df_cat, y72, miss_feature = deal_miss_nan(df_cat, y72)
@@ -790,30 +810,41 @@ if __name__ == '__main__':
 #           X_train_c = reX.copy()
 #           y_train_c = rey.copy()
         
+        # top 30 feature for prediction
+        # top30 = ['Free_typing', 'ER_visit_365', 'Ketorolac','ER_visit_30','Xrayh_T','WEIGHT','DD_visit_365','dxh137','dxh45','atc78','age1','ER_LOS','Dr_VSy','PULSE','in_PULSE','BPS','in_BPB','WEIGHT','in_BPS','x0_I69','dxh131','x0_M32','dxh32','x0_K51','x0_K70','x0_C73','x0_R30','dxh237','x0_C67']
+        # df_sub_train = pd.DataFrame(X_train_c, columns = encoding_head)
+        # df_sub_test = pd.DataFrame(preprocessed_X_test, columns = encoding_head)
+
+        # whether tune XGB
+        # best_hyperparams = tune_xgb(X_train_c,y_train_c)
+        best_hyperparams = {}
+
         # 就跑模型吧
         run_models(X_train_c, y_train_c, preprocessed_X_test, y_test, key, encoding_head, data_root_folder)
+        # run_models(df_sub_train[top30].values, y_train_c, df_sub_test[top30].values, y_test, key, top30, data_root_folder)
 
         # tune XGB hyperparameter, 利用bayesian opt,  
         
-#        space={'max_depth': hp.quniform("max_depth", 3, 18, 1),
-#        'gamma': hp.uniform ('gamma', 1,9),
-#        'reg_alpha' : hp.quniform('reg_alpha', 40,180,1),
-#        'reg_lambda' : hp.uniform('reg_lambda', 0,1),
-#        'colsample_bytree' : hp.uniform('colsample_bytree', 0.5,1),
-#        'min_child_weight' : hp.quniform('min_child_weight', 0, 10, 1),
-#        'n_estimators': 180,
-#        'seed': 0
-#        }
-#         
-#        train_x, val_x, train_y, val_y = train_test_split(X_train_c, y_train_c, test_size=1/8, random_state=40, stratify = y_train_c)   
-#        
-#        # define objective function
-#        best_hyperparams = fmin(fn = xgb_objective,
-#                        space = space,
-#                        algo = tpe.suggest,
-#                        max_evals = 100,
-#                        trials = Trials())
-
+        def tune_xgb(X_train_c,y_train_c):
+            space={'max_depth': hp.quniform("max_depth", 3, 18, 1),
+            'gamma': hp.uniform ('gamma', 1,9),
+            'reg_alpha' : hp.quniform('reg_alpha', 40,180,1),
+            'reg_lambda' : hp.uniform('reg_lambda', 0,1),
+            'colsample_bytree' : hp.uniform('colsample_bytree', 0.5,1),
+            'min_child_weight' : hp.quniform('min_child_weight', 0, 10, 1),
+            'n_estimators': 180,
+            'seed': 0
+            }
+            
+            train_x, val_x, train_y, val_y = train_test_split(X_train_c, y_train_c, test_size=1/8, random_state=40, stratify = y_train_c)   
+            
+            # define objective function
+            best_hyperparams = fmin(fn = xgb_objective,
+                            space = space,
+                            algo = tpe.suggest,
+                            max_evals = 100,
+                            trials = Trials())
+            return best_hyperparams
 # end of the code
 # NOTE =============================================================================================
     # # save data for autoML
@@ -850,60 +881,59 @@ if __name__ == '__main__':
 #sudo docker cp /home/anpo/Desktop/pyscript/EDr_72/ehr_processed.pickle 97a8233ac77e:/auto-sklearn/autosklearn
 
 
+## plot feature importance
 
+# # if XGB
+# dictA = bst_xgb.get_score(importance_type = 'weight')
+# dictB = bst_xgb.get_score(importance_type = 'gain')
+# dictC = bst_xgb.get_score(importance_type = 'cover')
+# dictD = bst_xgb.get_score(importance_type = 'total_gain')
+# dictE = bst_xgb.get_score(importance_type = 'total_cover')
 
+# def sort_dict_value(dict_in):
+#     dictA_sorted = { k: v for k, v in sorted(dict_in.items(), key=lambda item: item[1], reverse=True) }
+#     return dictA_sorted
 
+# dictA_ = sort_dict_value(dictA)
+# dictB_ = sort_dict_value(dictB)
+# dictC_ = sort_dict_value(dictC)
+# dictD_ = sort_dict_value(dictD)
+# dictE_ = sort_dict_value(dictE)
 
-     # 10 fold
-#     kfold = KFold(10, True, 1)
-#     aucs = []
-#     models = []
-#     k_idx = []
-#     data_size = np.arange(0,data_X.shape[0])
-#     for train, test in kfold.split(data_size):
-#         it_idx = {}
-#         it_idx['train'] = train
-#         it_idx['test'] = test
-#         k_idx.append(it_idx)
-#         # 只對xtrain做bootstrapping
-#         xtrain = data_X[data_size[train],:]
-#         ytrain = data_y[data_size[train]] 
-
-#         xtest = data_X[data_size[test],:]
-#         ytest = data_y[data_size[test]]        
-         # xgb evaluation set
-#         eval_set = [(xtrain,ytrain),(xtest,ytest)]
-#         # xgb early stopping
-#         model = clf.fit(xtrain, ytrain, early_stopping_rounds=5, eval_metric = "error", eval_set = eval_set)
-         # 
-               
-
-
-## if model is LG
-# importance = bst.coef_[0]
-# assert(len(encoding_head_flat) == len(importance))
+# # plot
+# bv = list(dictA_.keys())
+# xh = [encoding_head[int(u[1:])] for u in bv]
+# yh = list(dictA_.values())
 
 # fig, ax = plt.subplots(figsize=(12, 6))
-# plt.bar(np.arange(0,len(importance)), importance)
-# ax.set_xticks(np.arange(0, len(encoding_head_flat), step=1)) 
-# ax.set_xticklabels(encoding_head_flat) 
+# plt.bar(np.arange(0,len(yh)),yh)
+# ax.set_xticks(np.arange(0, len(xh), step=1)) 
+# ax.set_xticklabels(xh) 
 # plt.setp(ax.get_xticklabels(), rotation=90)
+# plt.xlabel("Xgboost Feature Importance")
 
-# if XGB
-#fig, ax = plt.subplots(figsize=(12, 6))
-#sorted_idx = bst.feature_importances_.argsort()
-##sorted_idx = np.sort(bst.feature_importances_)
-#xh = [encoding_head_flat[u] for u in sorted_idx]
-#yh = bst.feature_importances_[sorted_idx]
-#plt.bar(np.arange(0,len(yh)),yh)
-#ax.set_xticks(np.arange(0, len(encoding_head_flat), step=1)) 
-#ax.set_xticklabels(xh) 
-#plt.setp(ax.get_xticklabels(), rotation=90)
-#plt.xlabel("Xgboost Feature Importance")
-
-#results = model.evals_result()
+# imp2 = imp2.sort_values(by=['lg_beta'],ascending = False)
+# yh = imp2['lg_beta'].values[0:42]
+# xh = imp2['features'].values[0:42]
+# fig, ax = plt.subplots(figsize=(12, 6))
+# plt.bar(np.arange(0,len(yh)),yh)
+# ax.set_xticks(np.arange(0, len(xh), step=1)) 
+# ax.set_xticklabels(xh) 
+# plt.setp(ax.get_xticklabels(), rotation=90)
+# plt.xlabel("Logistic Regression Feature Importance")
 
 
+
+
+# explainer = shap.TreeExplainer(bst_xgb)
+# pX = pd.DataFrame(preprocessed_X)
+# shap_values = explainer.shap_values(pX)
+# shap.summary_plot(shap_values, pX)
+# #results = model.evals_result()
+# fig, ax = plt.subplots(figsize=(12, 6))
+# p = shap.force_plot(explainer.expected_value, shap_values[1,:], pX.iloc[1,:])
+# plt.savefig('tmp.png')
+# plt.close()
 
 
 
