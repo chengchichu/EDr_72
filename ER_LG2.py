@@ -13,7 +13,7 @@ import pandas as pd
 from sklearn.linear_model import LogisticRegression
 from sklearn.preprocessing import OneHotEncoder
 import numpy as np
-from sklearn.metrics import roc_curve, auc, classification_report, average_precision_score, confusion_matrix
+from sklearn.metrics import roc_curve, auc, classification_report, average_precision_score, confusion_matrix, roc_auc_score
 from numpy.random import randint, seed
 from collections import Counter
 from sklearn import metrics
@@ -24,7 +24,7 @@ from sklearn.preprocessing import StandardScaler, RobustScaler
 from sklearn.model_selection import train_test_split, KFold
 import seaborn as sn
 from sklearn.ensemble import RandomForestClassifier, VotingClassifier
-#from sklearn.feature_selection import SelectFromModel
+from sklearn.model_selection import cross_val_score
 import matplotlib.pyplot as plt
 #import xgboost as xgb
 from xgboost.sklearn import XGBClassifier
@@ -117,7 +117,7 @@ def model_auc(model, preprocessed_X, y_true):
     fpr, tpr, _ = roc_curve(y_true, y_score)
     roc_auc = auc(fpr, tpr)
     auprc = average_precision_score(y_true, y_score)
-    return roc_auc, auprc, y_score
+    return roc_auc, auprc, y_score, fpr, tpr
 
 def ml_model(clf,data_X,data_y):
     # 10 fold        
@@ -134,7 +134,10 @@ def ml_model(clf,data_X,data_y):
         # 只對xtrain做bootstrapping
         xtrain = data_X[data_size[train],:]
         ytrain = data_y[data_size[train]]        
-        xtrain, ytrain = bootstrap(xtrain, ytrain)
+        
+        # set this off, if already applied class weight
+        # if class_weight_apply == False:
+        #    xtrain, ytrain = bootstrap(xtrain, ytrain)
         xtest = data_X[data_size[test],:]
         ytest = data_y[data_size[test]]
         model = clf.fit(xtrain, ytrain)
@@ -143,9 +146,14 @@ def ml_model(clf,data_X,data_y):
         models.append(model)        
     # selection model with best AUC
     bst = models[np.argmax(aucs)]
-    return bst, models, k_idx, aucs
+    val_mean = np.mean(aucs)
+    val_sem = np.std(aucs)/np.sqrt(len(aucs))
+    val_out = (val_mean, val_sem)
+    # val_out['mean_auc'] = val_mean
+    # val_out['sem'] = val_sem
+    return bst, models, k_idx, val_out
 
-def model_xgb(clf,data_X,data_y, params):  
+def model_xgb(clf,data_X,data_y, params_in):  
      # use this step to balance the data, not sure it is necessary here
      #xtrain, ytrain = bootstrap(xtrain, ytrain)
      #切給 validation set, 10% of total, because train is 80%
@@ -154,6 +162,8 @@ def model_xgb(clf,data_X,data_y, params):
     dtrain = clf.DMatrix(X_train, label=y_train)
     dval = clf.DMatrix(X_test, label=y_test)
          # I will fix this initially, see reference Woo Suk Hong and Andrew Talyor, 2019, thier supplementary text
+    params = params_in.copy()
+    
     params['objective'] = 'binary:logistic'
 #              'nrounds': 20,
 #              'nthread': 5}
@@ -162,16 +172,18 @@ def model_xgb(clf,data_X,data_y, params):
     # params['max_depth'] = 8
     # params['min_child_weight'] = 7
     # params['min_child_weight'] = 4
-    params['subsample'] = 1
+    # params['subsample'] = 1
     # params['colsample_bytree'] = 0.51
     # params['colsample_bytree'] = 0.96
-    params['eta'] = 0.05
+    # params['eta'] = 0.05
+    # params['n_estimators'] = 15
     # params['gamma'] = 1.02
     # params['gamma'] = 2.5
     # params['reg_alpha'] = 60
     # params['reg_alpha'] = 158
     # params['reg_lambda'] = 0.66
     # params['reg_lambda'] = 0.54
+    # params['scale_pos_weight'] = 16
     num_boost_round = 999
     
     clf2 = clf.XGBClassifier(**params, use_label_encoder=False)
@@ -187,63 +199,79 @@ def model_xgb(clf,data_X,data_y, params):
             eval_set=evaluation, eval_metric="auc",
             early_stopping_rounds=10,verbose=False)
     
-    # print("Best AUC: {:.2f} with {} rounds".format(model.best_score, model.best_iteration+1))
-    # gridsearch_params = [ (max_depth, min_child_weight) for max_depth in range(9,12) for min_child_weight in range(5,8)]
-    # gridsearch_params = [ (subsample, colsample) for subsample in [i/10. for i in range(7,11)] for colsample in [i/10. for i in range(7,11)]]
-    # Define initial best params and MAE
-    # max_auc = 0.5
-    # best_params = None
-    # for eta in [.3, .2, .1, .05, .01, .005]:
-    #     print("CV with eta={}".format(eta))
-    #     # Update our parameters
-    #     params['eta'] = eta
-    #     # Run CV
-    #     cv_results = clf.cv(
-    #         params,
-    #         dtrain,
-    #         num_boost_round=num_boost_round,
-    #         seed=42,
-    #         nfold=10,
-    #         metrics={'auc'},
-    #         early_stopping_rounds=10
-    #     )
-    #     # Update best MAE
-    #     print(cv_results)
-    #     mean_auc = cv_results['test-auc-mean'].max()
-    #     boost_rounds = cv_results['test-auc-mean'].argmax()
-    #     print("\tAUC {} for {} rounds".format(mean_auc, boost_rounds))
-        
-    #     if mean_auc > max_auc:
-    #        max_auc = mean_auc
-    #        best_params = eta
-            
-    # print("Best params: {}, {}, AUC: {}".format(best_params[0], best_params[1], max_auc))
+
     return model, model2
 
-def xgb_objective(space):
-    clf=xgb.XGBClassifier(
-                    n_estimators =space['n_estimators'], max_depth = int(space['max_depth']), gamma = space['gamma'],
-                    reg_alpha = int(space['reg_alpha']),min_child_weight=int(space['min_child_weight']),
-                    colsample_bytree=int(space['colsample_bytree']), use_label_encoder=False)
+# def tune_logistic(X,y):
+# 	
+#     # example of grid searching key hyperparametres for logistic regression
+#     # from sklearn.datasets import make_blobs
+#     from sklearn.model_selection import RepeatedStratifiedKFold
+#     from sklearn.model_selection import GridSearchCV
+#     from sklearn.linear_model import LogisticRegression
+    
+#     # define models and parameters
+#     model = LogisticRegression()
+#     solvers = ['newton-cg', 'lbfgs', 'liblinear']
+#     penalty = ['l2']
+#     c_values = [100, 10, 1.0, 0.1, 0.01]
+#     # define grid search
+#     grid = dict(solver=solvers,penalty=penalty,C=c_values)
+#     cv = RepeatedStratifiedKFold(n_splits=10, n_repeats=3, random_state=1)
+#     grid_search = GridSearchCV(estimator=model, param_grid=grid, n_jobs=-1, cv=cv, scoring='roc_auc',error_score=0)
+#     grid_result = grid_search.fit(X, y)
+#     # summarize results
+#     print("Best: %f using %s" % (grid_result.best_score_, grid_result.best_params_))
+#     means = grid_result.cv_results_['mean_test_score']
+#     stds = grid_result.cv_results_['std_test_score']
+#     params = grid_result.cv_results_['params']
+#     for mean, stdev, param in zip(means, stds, params):
+#         print("%f (%f) with: %r" % (mean, stdev, param))
+
+# def tune_rf(X, y):
+
+#     from sklearn.model_selection import RandomizedSearchCV
+#     from sklearn.ensemble import RandomForestClassifier
+#     # define dataset
+#     # define models and parameters
+#     model = RandomForestClassifier()
+
+#     rand_grid = {'bootstrap': [True, False],
+#       'max_depth': [10, 25, 50, 100],
+#       'max_features': ['sqrt','log2'],
+#       'min_samples_leaf': [1, 2, 4],
+#       'min_samples_split': [2, 5, 10],
+#       'n_estimators': [10, 100, 500, 1000]}
+    
+#     # rand_grid = {'bootstrap': [True, False],
+#     #   'max_depth': [10, 20],
+#     #   'max_features': ['sqrt','log2'],
+#     #   'min_samples_leaf': [1, 2],
+#     #   'min_samples_split': [2, 5],
+#     #   'n_estimators': [100, 200]}
+    
+    
+#     # define grid search
+#     # grid = dict(n_estimators=n_estimators,max_features=max_features)
+#     cv = RepeatedStratifiedKFold(n_splits=10, n_repeats=3, random_state=1)
+#     # grid_search = GridSearchCV(estimator=model, param_grid=grid, n_jobs=-1, cv=cv, scoring='roc_auc',error_score=0)
+#     # grid_result = grid_search.fit(X, y)
+    
+#     grid_search = RandomizedSearchCV(estimator=model, param_distributions=rand_grid, n_jobs=-1, cv=cv, scoring='roc_auc')
+#     grid_result = grid_search.fit(X, y)
+    
+#     # summarize results
+#     print("Best: %f using %s" % (grid_result.best_score_, grid_result.best_params_))
+#     means = grid_result.cv_results_['mean_test_score']
+#     stds = grid_result.cv_results_['std_test_score']
+#     params = grid_result.cv_results_['params']
+#     for mean, stdev, param in zip(means, stds, params):
+#         print("%f (%f) with: %r" % (mean, stdev, param))
+
+
+      
     
    
-    evaluation = [( train_x, train_y), ( val_x, val_y)]
-    
-    # print(evaluation)
-    
-    clf.fit(train_x, train_y,
-            eval_set=evaluation, eval_metric="auc",
-            early_stopping_rounds=10,verbose=False)
-            
-    pred = clf.predict(val_x)
-    
-    out = model_auc(clf, val_x, val_y)
-    
-    auroc = out[0]
-    
-    # accuracy = accuracy_score(, pred>0.5)
-    print ("auc:", auroc)
-    return {'loss': -auroc, 'status': STATUS_OK }
 
 
 def bootstrap(datax,datay):    
@@ -293,17 +321,32 @@ def model_result(y_test, bst, modelname, X_test):
     else:    
        cm = confusion_matrix(y_test, bst.predict(X_test))
        cp = classification_report(y_test, bst.predict(X_test), target_names=['沒回診','有回診'])
-    return cm, cp
+         
+        # accuracy and specificity
+    total=sum(sum(cm))
+    accuracy1=(cm[0,0]+cm[1,1])/total
+    specificity1 = cm[0,0]/(cm[0,1]+cm[0,0])   
+    precision = cm[1,1]/(cm[1,1]+cm[0,1])   
+    recall = cm[1,1]/(cm[1,1]+cm[1,0])
+    f1 = 2*precision*recall/(precision+recall)
+    other_scores = (accuracy1,specificity1,precision,recall,f1) 
+    
+    return cm, cp, other_scores
 
-def table_r(cp,cm,auc):
+def table_r(cp,cm,auc_in, others):
     lines = cp.splitlines()
     c=[np.array(lines[2].split()[1:4]), np.array(lines[3].split()[1:4])]
     out = np.concatenate((cm,c),axis=1)
-    cc = np.array([auc, np.nan])
-    out = np.concatenate((out,cc.reshape(2,-1)),axis=1)    
-    print(tabulate(out, headers=['p0', 'p1','precision','recall','f1','AUC']))
+    cc = np.array([auc_in, np.nan])
+    out = np.concatenate((out,cc.reshape(2,-1)),axis=1)
     
-    tb = tabulate(out, headers=['p0', 'p1','precision','recall','f1','AUC'])
+    for i in others:
+        cc = np.array([i, np.nan])
+        out = np.concatenate((out,cc.reshape(2,-1)),axis=1)
+        
+    tb = tabulate(out, headers=['p0', 'p1','precision','recall','f1','AUC','ACC','SP','PC','RE','F1']) 
+    print(tb)
+        
     return tb
 
 def preprocess(X_train, y_train, X_test, cols, fs_to_imp):  
@@ -386,36 +429,98 @@ def preprocess(X_train, y_train, X_test, cols, fs_to_imp):
     #print(len(encoding_head))    
     
     return preprocessed_X, y72, preprocessed_X_test, encoding_head
+   
+
+def cls_constructor(clfname, params):
     
-def run_models(X_train_c, y_train_c, preprocessed_X_test, y_test, model_strat, encoding_head, data_root_folder):
-        ## 跑model      
-    clf1 = LogisticRegression(random_state=0, max_iter=5000)
+    if clfname == 'lg':    
+       clf = LogisticRegression(**params, random_state=0, max_iter=5000)       
+    elif clfname == 'rf':    
+       clf = RandomForestClassifier(**params, random_state=0)       
+    else:
+       print('no matched cls')
+    return clf    
+
+    # elif clfname == 'xgb':  
+    #    clf = xgb.XGBClassifier(**params,use_label_encoder=False)
+
+           
+def run_models(X_train_c, y_train_c, preprocessed_X_test, y_test, model_strat, encoding_head, data_root_folder, best_hyperparams):
+    
+    ## 跑model      
+    if class_weight_apply == False:     
+       if best_hyperparams:   
+          params = best_hyperparams['lg']      
+       else:
+          params = {} 
+    else:
+       if best_hyperparams:
+          params = best_hyperparams['lg']
+          params['class_weight'] = {0:0.05,1:0.95}
+       else: 
+          params = {} 
+          params['class_weight'] = {0:0.05,1:0.95}
+          
+    clf1 = cls_constructor('lg', params)      
     print('running LG')
     bst_lg, models, kidx, aucs_lg = ml_model(clf1, X_train_c, y_train_c)
     
-     # LG imp
+    # LG imp
     imp = pd.DataFrame(data = abs(bst_lg.coef_[0]),columns = ['lg_beta'])
     head = pd.DataFrame(data = encoding_head,columns = ['features'])
-    imp2 = pd.concat([imp, head],axis = 1)
-    print(imp2.sort_values(by=['lg_beta'],ascending = False))
+    imp_LG = pd.concat([imp, head],axis = 1)
+    # print(imp_LG.sort_values(by=['lg_beta'],ascending = False))
     
-    clf2 = RandomForestClassifier(random_state=0)  ## 隨機森林
+    params = {}
+    if class_weight_apply == False:     
+       if best_hyperparams:   
+          params = best_hyperparams['rf']      
+       else:
+          params = {} 
+    else:
+       if best_hyperparams:
+          params = best_hyperparams['rf']
+          params['class_weight'] = {0:0.05,1:0.95}
+       else: 
+          params = {} 
+          params['class_weight'] = {0:0.05,1:0.95}   
+          
+    clf2 = cls_constructor('rf', params)      
     print('running RF')
     bst_rf, models, kidx, aucs_rf = ml_model(clf2, X_train_c, y_train_c)
     
-    imp = pd.DataFrame(data = abs(bst_rf.feature_importances_),columns = ['rf_importance'])
-    imp2 = pd.concat([imp, head],axis = 1)
-    print(imp2.sort_values(by=['rf_importance'],ascending = False))
-    
-    
-     # #這裡不直接用sklearn的方法 方便調參
-    # clf3 = XGBClassifier(use_label_encoder=False, eval_metric="auc") #sklearn
-   # bst_xgb, models, kidx, aucs_xgb = ml_model(clf3, X_train_c, y_train_c)
-    print('running XGB')    
-    bst_xgb, bst_xgb2 = model_xgb(xgb, X_train_c, y_train_c, best_hyperparams)
     # 
+    imp = pd.DataFrame(data = abs(bst_rf.feature_importances_),columns = ['rf_importance'])
+    imp_RF = pd.concat([imp, head],axis = 1)
+    # print(imp_RF.sort_values(by=['rf_importance'],ascending = False))
     
-   
+    
+    print('running XGB')  
+    if class_weight_apply == False:     
+       if best_hyperparams:   
+          bst_xgb, params_xgb = model_xgb(xgb, X_train_c, y_train_c, best_hyperparams['xgb'])      
+       else:
+          bst_xgb, bst_xgb2 = model_xgb(xgb, X_train_c, y_train_c, best_hyperparams)
+    else: 
+       if best_hyperparams:
+          best_hyperparams['xgb']['scale_pos_weight'] = 16 
+          bst_xgb, params_xgb = model_xgb(xgb, X_train_c, y_train_c, best_hyperparams['xgb'])  
+       else:
+          best_hyperparams['scale_pos_weight'] = 16   
+          bst_xgb, params_xgb = model_xgb(xgb, X_train_c, y_train_c, best_hyperparams)
+  
+    # clf3 = cls_constructor('xgb', params_xgb)      
+    # bst_xgb2, _, kidx, aucs_xgb = ml_model(params_xgb, X_train_c, y_train_c)
+    # bst_xgb2 = params_xgb
+    # different type of feature imp for xgb 
+    dictA = bst_xgb.get_score(importance_type = 'weight')
+    dictB = bst_xgb.get_score(importance_type = 'gain')
+    dictC = bst_xgb.get_score(importance_type = 'cover')
+    dictD = bst_xgb.get_score(importance_type = 'total_gain')
+    dictE = bst_xgb.get_score(importance_type = 'total_cover')
+    impXGB = [dictA, dictB, dictC, dictD, dictE]
+    
+       
     clf4 = LinearSVC(random_state=0, tol=1e-5, dual=False, max_iter = 10000) 
     print('running SVC')
     bst_svm, models, kidx, aucs_svm = ml_model(clf4, X_train_c, y_train_c)
@@ -423,45 +528,58 @@ def run_models(X_train_c, y_train_c, preprocessed_X_test, y_test, model_strat, e
     eclf1 = VotingClassifier(estimators=[('lg', bst_lg), ('rf', bst_rf), ('xgb', bst_xgb2)], voting='soft', weights = [2.5,5,5])
     bst_eclf, models, kidx, aucs_eclf = ml_model(eclf1, X_train_c, y_train_c)
     
-    cm_lg, cp_lg = model_result(y_test, bst_lg, 'LG', preprocessed_X_test)
-    cm_rf, cp_rf = model_result(y_test, bst_rf, 'RF', preprocessed_X_test)
-    cm_xg, cp_xg = model_result(y_test, bst_xgb, 'XGB', preprocessed_X_test)
-    cm_sv, cp_sv = model_result(y_test, bst_svm, 'SVM', preprocessed_X_test)
-    cm_ec, cp_ec = model_result(y_test, bst_eclf, 'ECLF', preprocessed_X_test)
+    cm_lg, cp_lg, others_lg = model_result(y_test, bst_lg, 'LG', preprocessed_X_test)
+    cm_rf, cp_rf, others_rf  = model_result(y_test, bst_rf, 'RF', preprocessed_X_test)
+    cm_xg, cp_xg, others_xg  = model_result(y_test, bst_xgb, 'XGB', preprocessed_X_test)
+    cm_sv, cp_sv, others_sv  = model_result(y_test, bst_svm, 'SVM', preprocessed_X_test)
+    cm_ec, cp_ec, others_ec  = model_result(y_test, bst_eclf, 'ECLF', preprocessed_X_test)
 
-   # metrics.plot_roc_curve(bst_lg, preprocessed_X_test, y_test)
-
-    lg_auc, lgprc, lg_yscore = model_auc(bst_lg, preprocessed_X_test, y_test)
-    rf_auc, rfprc, rf_yscore = model_auc(bst_rf, preprocessed_X_test, y_test)
-   
+     # metrics.plot_roc_curve(bst_lg, preprocessed_X_test, y_test)
+    models_ = {}
+    lg_auc, lgprc, lg_yscore, fpr, tpr = model_auc(bst_lg, preprocessed_X_test, y_test)
+    models_['lg'] = (fpr, tpr, lg_auc, aucs_lg, lg_yscore)
+    rf_auc, rfprc, rf_yscore, fpr, tpr = model_auc(bst_rf, preprocessed_X_test, y_test)
+    models_['rf'] = (fpr, tpr, rf_auc, aucs_rf, rf_yscore)
+    svm_auc, svmprc, svm_yscore, fpr, tpr = model_auc(bst_svm, preprocessed_X_test, y_test)
+    models_['svm'] = (fpr, tpr, svm_auc, aucs_svm, svm_yscore)
+    ec_auc, ecprc, ec_yscore, fpr, tpr = model_auc(bst_eclf, preprocessed_X_test, y_test)
+    models_['ec'] = (fpr, tpr, ec_auc, aucs_eclf, ec_yscore)
      # xgb test part 跟別人不同分開寫
     dtest = xgb.DMatrix(preprocessed_X_test , label = y_test)
     xgb_yscore = bst_xgb.predict(dtest)
     fpr, tpr, _ = roc_curve(y_test, xgb_yscore)
     xgb_auc = auc(fpr, tpr)
-        
-    svm_auc, svmprc, svm_yscore = model_auc(bst_svm, preprocessed_X_test, y_test)
-    ec_auc, ecprc, ec_yscore = model_auc(bst_eclf, preprocessed_X_test, y_test)
+    models_['xgb'] = (fpr, tpr,xgb_auc, aucs_xgb, xgb_yscore)
     
+    imps = {}
+    imps['lg'] = imp_LG
+    imps['rf'] = imp_RF
+    imps['xgb'] = impXGB    
+    models_['feature_imp'] = imps
+     
     # if not model_strat:
     print(model_strat)
     print('LG')
-    tb1 = table_r(cp_lg,cm_lg,lg_auc)
+    tb1 = table_r(cp_lg,cm_lg,lg_auc,others_lg)
     print('RF')
-    tb2 = table_r(cp_rf,cm_rf,rf_auc)
+    tb2 = table_r(cp_rf,cm_rf,rf_auc,others_rf)
     print('XGB')
-    tb3 = table_r(cp_xg,cm_xg,xgb_auc)
+    tb3 = table_r(cp_xg,cm_xg,xgb_auc,others_xg)
     print('SVM')
-    tb4 = table_r(cp_sv,cm_sv,svm_auc)
+    tb4 = table_r(cp_sv,cm_sv,svm_auc,others_sv)
     print('EC')
-    tb5 = table_r(cp_ec,cm_ec,ec_auc)
+    tb5 = table_r(cp_ec,cm_ec,ec_auc,others_ec)
      
     filename = 'M'+model_strat+'result.txt'
     ftb = 'LG' + '\n' + tb1 + '\n' +'RF' + '\n' + tb2 + '\n' +'XGB' + '\n' + tb3 + '\n' +'SVM' + '\n' + tb4 + '\n' +'EC' + '\n' + tb5 + '\n'
-            
+                
+    ftb2 = ftb+'\n'+'train_size:'+str(X_train_c.shape[0])+'\n'+'test_size:'+str(preprocessed_X_test.shape[0])
+    
     with open(data_root_folder+filename, 'w') as f:
-         f.write(ftb+'\n'+'train_size:'+str(X_train_c.shape[0])+'\n'+'test_size:'+str(preprocessed_X_test.shape[0]))
+         f.write(ftb2)
       
+        
+    return models_   
    ############################### 
     
     # # finding the best weight for voting classifier
@@ -552,18 +670,18 @@ def deal_miss_nan(X, y):
     # 不連續類別之缺失
     cats = ['DPT2','SEX','ANISICCLSF_C','INTY','week','weekday','indate_time_gr','GCSE','GCSV','GCSM', \
             'indate_month','ANISICMIGD','ANISICMIGD_1','ANISICMIGD_3','ct','MRI','xray','EKG','Echo', \
-            'in_GCSE','in_GCSV','in_GCSM','in_ANISICCLSF_C','in_ANISICMIGD','in_ANISICMIGD_1','in_ANISICMIGD_3'] #, \
-            # 'ICD3'] 
+            'in_GCSE','in_GCSV','in_GCSM','in_ANISICCLSF_C','in_ANISICMIGD','in_ANISICMIGD_1','in_ANISICMIGD_3', \
+            'ICD3'] 
     for i in cats:
         print(sum(Xcopy[i].isna()))     
     
     # 缺失新增類別
     Xcopy['INTY'].fillna(value=10, inplace=True)
-    # Xcopy['ICD3'].fillna(value='noICD', inplace=True)
+    Xcopy['ICD3'].fillna(value='noICD', inplace=True)
     
     # 對類別變項檢查, 如果只有<5 sample移除, 無法平均的分給train and test    
-    # cat_cols = ['INTY', 'ICD3']   
-    cat_cols = ['INTY'] 
+    cat_cols = ['INTY', 'ICD3']   
+    # cat_cols = ['INTY'] 
     row_idx = np.empty(0).astype(int)    
     for i in cat_cols:
         table = Xcopy[i].value_counts()
@@ -635,7 +753,7 @@ if __name__ == '__main__':
     cols['Codeine'] = 2
     cols['Morphine'] = 2
     cols['Nalbuphine'] = 2
-    # cols['ICD3'] = 0
+    cols['ICD3'] = 0
     
     cols['ER_LOS'] = 1
     cols['age1'] = 1
@@ -689,10 +807,10 @@ if __name__ == '__main__':
 
     # # make sure you get ccs right in CCS_distribution.py
     # index admission的主診斷
-    with open(data_root_folder+'ccs_distri.txt', 'r') as f:
-          ccs_ids = f.read().splitlines()       
-          for i in range(len(ccs_ids)):
-              cols[ccs_ids[i]] = 2
+    # with open(data_root_folder+'ccs_distri.txt', 'r') as f:
+    #       ccs_ids = f.read().splitlines()       
+    #       for i in range(len(ccs_ids)):
+    #           cols[ccs_ids[i]] = 2
        
     # # 過去兩年病史
     with open(data_root_folder+'ccsh_distri.txt', 'r') as f:
@@ -708,10 +826,10 @@ if __name__ == '__main__':
                      
     column_keys = cols.keys()
     df_cat = df[column_keys]
-    # y72 = df['re72'] 
+    y72 = df['re72'] 
     
-    bad_outcome = df['next_DEAD'] | df['next_ICU']
-    y72 = df['next_adm'] & df['re72']
+    # bad_outcome = df['next_DEAD'] | df['next_ICU']
+    # y72 = df['next_adm'] & df['re72']
  
     # 極端值處理, 確認連續類別為數字      
     df_cat, y72, miss_feature = deal_miss_nan(df_cat, y72)
@@ -727,7 +845,7 @@ if __name__ == '__main__':
     # strat_params['DPT2_3'] = 3
            
     # 利用主訴來切子模型
-    sub_model = False
+    sub_model = True
     keys_to_remove = [] #
     strat_params = {}
     if sub_model:
@@ -743,7 +861,9 @@ if __name__ == '__main__':
        cols.pop(key_to_strat)    
     else:    
        strat_params['全'] = ''
-
+    
+    strat_params = {}
+    strat_params['中分類1'] = '腹痛'
    
     # 子模迴圈
     # total_cols = {} 
@@ -787,7 +907,7 @@ if __name__ == '__main__':
         if balanced:
             
            if not sub_model:
-              n_seeds_num = 4000
+              n_seeds_num = 4000 # original 4000, 500 for 2nd return
            else:                
               n_seeds_num = 50
                               
@@ -810,41 +930,118 @@ if __name__ == '__main__':
 #           X_train_c = reX.copy()
 #           y_train_c = rey.copy()
         
+        
+
+        # whether tune XGB
+        
+        # best_hyperparams = tune_xgb(X_train_c,y_train_c)
+        # tuned params
+        best_hyperparams = {}
+        # a = {}
+        # a['C'] = 0.01
+        # a['penalty'] = 'l2'
+        # a['solver'] = 'lbfgs'
+        # best_hyperparams['lg'] = a
+        
+        # a = {}
+        # a['n_estimators'] = 1000
+        # a['min_samples_split'] = 10
+        # a['min_samples_leaf'] = 4
+        # a['max_features'] = 'sqrt'
+        # a['max_depth'] = 100
+        # a['bootstrap'] = False
+        # best_hyperparams['rf'] = a
+        
+        # a = {}
+        # a['colsample_bytree'] = 0.6139480884612674
+        # a['eta'] = 0.29102031122262007
+        # a['gamma'] = 1.718798165571878
+        # a['max_depth'] = 14
+        # a['min_child_weight'] = 1
+        # a['n_estimators'] = 10
+        # a['subsample'] = 0.8771867793610909
+        # best_hyperparams['xgb'] = a
+                
+        class_weight_apply = False
+   
+
+        # 就跑模型吧
+        # models_out = run_models(X_train_c, y_train_c, preprocessed_X_test, y_test, '腹痛', encoding_head, data_root_folder, best_hyperparams)
+        # run_models(df_sub_train[top30].values, y_train_c, df_sub_test[top30].values, y_test, key, top30, data_root_folder)
+
+
         # top 30 feature for prediction
         # top30 = ['Free_typing', 'ER_visit_365', 'Ketorolac','ER_visit_30','Xrayh_T','WEIGHT','DD_visit_365','dxh137','dxh45','atc78','age1','ER_LOS','Dr_VSy','PULSE','in_PULSE','BPS','in_BPB','WEIGHT','in_BPS','x0_I69','dxh131','x0_M32','dxh32','x0_K51','x0_K70','x0_C73','x0_R30','dxh237','x0_C67']
         # df_sub_train = pd.DataFrame(X_train_c, columns = encoding_head)
         # df_sub_test = pd.DataFrame(preprocessed_X_test, columns = encoding_head)
+        # models30_out = run_models(df_sub_train[top30].values, y_train_c, df_sub_test[top30].values, y_test, '腹痛30', top30, data_root_folder, best_hyperparams)
 
-        # whether tune XGB
-        # best_hyperparams = tune_xgb(X_train_c,y_train_c)
-        best_hyperparams = {}
-
-        # 就跑模型吧
-        run_models(X_train_c, y_train_c, preprocessed_X_test, y_test, key, encoding_head, data_root_folder)
-        # run_models(df_sub_train[top30].values, y_train_c, df_sub_test[top30].values, y_test, key, top30, data_root_folder)
-
-        # tune XGB hyperparameter, 利用bayesian opt,  
+    
+        # with open('model_out_abdominal_pain.pickle', 'wb') as handle:
+        #       pickle.dump(models_out, handle, protocol=pickle.HIGHEST_PROTOCOL)
+     
         
-        def tune_xgb(X_train_c,y_train_c):
-            space={'max_depth': hp.quniform("max_depth", 3, 18, 1),
-            'gamma': hp.uniform ('gamma', 1,9),
-            'reg_alpha' : hp.quniform('reg_alpha', 40,180,1),
-            'reg_lambda' : hp.uniform('reg_lambda', 0,1),
-            'colsample_bytree' : hp.uniform('colsample_bytree', 0.5,1),
-            'min_child_weight' : hp.quniform('min_child_weight', 0, 10, 1),
-            'n_estimators': 180,
-            'seed': 0
-            }
-            
-            train_x, val_x, train_y, val_y = train_test_split(X_train_c, y_train_c, test_size=1/8, random_state=40, stratify = y_train_c)   
-            
-            # define objective function
-            best_hyperparams = fmin(fn = xgb_objective,
-                            space = space,
-                            algo = tpe.suggest,
-                            max_evals = 100,
-                            trials = Trials())
-            return best_hyperparams
+        # with open('model_out_30_abdominal_pain.pickle', 'wb') as handle:
+        #       pickle.dump(models30_out, handle, protocol=pickle.HIGHEST_PROTOCOL)
+     
+        
+
+    
+    
+    
+    
+    
+# def xgb_objective(space):
+#     clf=xgb.XGBClassifier(n_estimators = space['n_estimators'],
+#                     eta = space['eta'],
+#                     subsample = space['subsample'],
+#                     max_depth = space['max_depth'], 
+#                     gamma = space['gamma'],
+#                     min_child_weight=space['min_child_weight'],
+#                     colsample_bytree=space['colsample_bytree'],
+#                     use_label_encoder=False)
+#     evaluation = [( train_x, train_y), ( val_x, val_y)]                
+#     # print(evaluation)                
+#     clf.fit(train_x, train_y, eval_set=evaluation, eval_metric="auc", 
+#         early_stopping_rounds=30)
+        
+#     pred = clf.predict_proba(train_x)[:,1]                  
+#     auc_ = roc_auc_score(train_y, pred)
+    
+#     print("AUC score:", auc_)
+    
+#     return{'loss':str(1-auc_), 'status': STATUS_OK }
+    # return STATUS_OK
+    # Baysian Opt
+
+# space={
+# 'max_depth': hp.choice('max_depth', np.arange(3, 18, 1, dtype=int)),
+# 'gamma': hp.uniform('gamma', 1,9),
+# 'colsample_bytree' : hp.uniform('colsample_bytree', 0.5,1),
+# 'subsample' : hp.uniform('subsample', 0.5,1),
+# 'min_child_weight' : hp.choice('min_child_weight', np.arange(0, 10, 1, dtype=int)), 
+# 'eta' : hp.uniform('eta', 0.005, 0.3),
+# 'n_estimators' : hp.choice('n_estimators', np.arange(20, 200, 5, dtype=int)),
+# 'seed': 0
+# }
+
+
+
+# train_x, val_x, train_y, val_y = train_test_split(X_train_c, y_train_c, test_size=1/8, random_state=40, stratify = y_train_c) 
+    
+#      # define objective function
+# best_hyperparams = fmin(fn = xgb_objective,
+#                 space = space,
+#                 algo = tpe.suggest,
+#                 max_evals = 100,
+#                 trials = Trials())
+
+    
+
+
+    
+    
+
 # end of the code
 # NOTE =============================================================================================
     # # save data for autoML
@@ -881,59 +1078,6 @@ if __name__ == '__main__':
 #sudo docker cp /home/anpo/Desktop/pyscript/EDr_72/ehr_processed.pickle 97a8233ac77e:/auto-sklearn/autosklearn
 
 
-## plot feature importance
-
-# # if XGB
-# dictA = bst_xgb.get_score(importance_type = 'weight')
-# dictB = bst_xgb.get_score(importance_type = 'gain')
-# dictC = bst_xgb.get_score(importance_type = 'cover')
-# dictD = bst_xgb.get_score(importance_type = 'total_gain')
-# dictE = bst_xgb.get_score(importance_type = 'total_cover')
-
-# def sort_dict_value(dict_in):
-#     dictA_sorted = { k: v for k, v in sorted(dict_in.items(), key=lambda item: item[1], reverse=True) }
-#     return dictA_sorted
-
-# dictA_ = sort_dict_value(dictA)
-# dictB_ = sort_dict_value(dictB)
-# dictC_ = sort_dict_value(dictC)
-# dictD_ = sort_dict_value(dictD)
-# dictE_ = sort_dict_value(dictE)
-
-# # plot
-# bv = list(dictA_.keys())
-# xh = [encoding_head[int(u[1:])] for u in bv]
-# yh = list(dictA_.values())
-
-# fig, ax = plt.subplots(figsize=(12, 6))
-# plt.bar(np.arange(0,len(yh)),yh)
-# ax.set_xticks(np.arange(0, len(xh), step=1)) 
-# ax.set_xticklabels(xh) 
-# plt.setp(ax.get_xticklabels(), rotation=90)
-# plt.xlabel("Xgboost Feature Importance")
-
-# imp2 = imp2.sort_values(by=['lg_beta'],ascending = False)
-# yh = imp2['lg_beta'].values[0:42]
-# xh = imp2['features'].values[0:42]
-# fig, ax = plt.subplots(figsize=(12, 6))
-# plt.bar(np.arange(0,len(yh)),yh)
-# ax.set_xticks(np.arange(0, len(xh), step=1)) 
-# ax.set_xticklabels(xh) 
-# plt.setp(ax.get_xticklabels(), rotation=90)
-# plt.xlabel("Logistic Regression Feature Importance")
-
-
-
-
-# explainer = shap.TreeExplainer(bst_xgb)
-# pX = pd.DataFrame(preprocessed_X)
-# shap_values = explainer.shap_values(pX)
-# shap.summary_plot(shap_values, pX)
-# #results = model.evals_result()
-# fig, ax = plt.subplots(figsize=(12, 6))
-# p = shap.force_plot(explainer.expected_value, shap_values[1,:], pX.iloc[1,:])
-# plt.savefig('tmp.png')
-# plt.close()
 
 
 
@@ -959,11 +1103,6 @@ if __name__ == '__main__':
 ############functions#####################
 
 
-#
-## 其他模型performance指標
-#def model_report(model, preprocessed_X, y_true, class_labels):
-#    y_pred = model.predict(preprocessed_X)
-#    print(classification_report(y_true, y_pred, target_names=class_labels))
 
 # 隨便抽 match minor class的數量
 #def under_sample(y_true, X):
