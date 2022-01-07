@@ -17,16 +17,16 @@ from sklearn.metrics import roc_curve, auc, classification_report, average_preci
 from numpy.random import randint, seed
 from collections import Counter
 from sklearn import metrics
-from sklearn.svm import LinearSVC
 #from sklearn.svm import SVC
+from sklearn.svm import LinearSVC
+from sklearn.ensemble import VotingClassifier, RandomForestClassifier
 from sklearn.neural_network import MLPClassifier
 from sklearn.preprocessing import StandardScaler, RobustScaler
 from sklearn.model_selection import train_test_split, KFold
 import seaborn as sn
-from sklearn.ensemble import RandomForestClassifier, VotingClassifier
 from sklearn.model_selection import cross_val_score
 import matplotlib.pyplot as plt
-#import xgboost as xgb
+import xgboost as xgb
 from xgboost.sklearn import XGBClassifier
 #from scipy.stats import chi2_contingency
 from imblearn.under_sampling import OneSidedSelection, CondensedNearestNeighbour
@@ -38,6 +38,8 @@ fconvert = np.vectorize(float)
 from tabulate import tabulate
 import xgboost as xgb
 from hyperopt import hp, tpe, Trials, fmin, STATUS_OK
+import random
+
 
 ### Functions
 
@@ -111,15 +113,15 @@ def assert_number(data, lab):
 
 def model_auc(model, preprocessed_X, y_true):
     try: 
-       y_score = model.predict_proba(preprocessed_X)[:,1]
+        y_score = model.predict_proba(preprocessed_X)[:,1]
     except:       
-       y_score = model.decision_function(preprocessed_X)   
+        y_score = model.decision_function(preprocessed_X)    
     fpr, tpr, _ = roc_curve(y_true, y_score)
     roc_auc = auc(fpr, tpr)
     auprc = average_precision_score(y_true, y_score)
     return roc_auc, auprc, y_score, fpr, tpr
 
-def ml_model(clf,data_X,data_y):
+def ml_model(clf,data_X,data_y, set_bootstrap):
     # 10 fold        
     kfold = KFold(10, True, 1)
     aucs = []
@@ -136,8 +138,8 @@ def ml_model(clf,data_X,data_y):
         ytrain = data_y[data_size[train]]        
         
         # set this off, if already applied class weight
-        # if class_weight_apply == False:
-        #    xtrain, ytrain = bootstrap(xtrain, ytrain)
+        if set_bootstrap == True:             
+           xtrain, ytrain = bootstrap(xtrain, ytrain)
         xtest = data_X[data_size[test],:]
         ytest = data_y[data_size[test]]
         model = clf.fit(xtrain, ytrain)
@@ -149,8 +151,6 @@ def ml_model(clf,data_X,data_y):
     val_mean = np.mean(aucs)
     val_sem = np.std(aucs)/np.sqrt(len(aucs))
     val_out = (val_mean, val_sem)
-    # val_out['mean_auc'] = val_mean
-    # val_out['sem'] = val_sem
     return bst, models, k_idx, val_out
 
 def model_xgb(clf,data_X,data_y, params_in):  
@@ -196,83 +196,9 @@ def model_xgb(clf,data_X,data_y, params_in):
     evaluation = [( X_train, y_train), ( X_test, y_test)]
     
     model2 = clf2.fit(X_train, y_train,
-            eval_set=evaluation, eval_metric="auc",
+            eval_set=evaluation,
             early_stopping_rounds=10,verbose=False)
-    
-
     return model, model2
-
-# def tune_logistic(X,y):
-# 	
-#     # example of grid searching key hyperparametres for logistic regression
-#     # from sklearn.datasets import make_blobs
-#     from sklearn.model_selection import RepeatedStratifiedKFold
-#     from sklearn.model_selection import GridSearchCV
-#     from sklearn.linear_model import LogisticRegression
-    
-#     # define models and parameters
-#     model = LogisticRegression()
-#     solvers = ['newton-cg', 'lbfgs', 'liblinear']
-#     penalty = ['l2']
-#     c_values = [100, 10, 1.0, 0.1, 0.01]
-#     # define grid search
-#     grid = dict(solver=solvers,penalty=penalty,C=c_values)
-#     cv = RepeatedStratifiedKFold(n_splits=10, n_repeats=3, random_state=1)
-#     grid_search = GridSearchCV(estimator=model, param_grid=grid, n_jobs=-1, cv=cv, scoring='roc_auc',error_score=0)
-#     grid_result = grid_search.fit(X, y)
-#     # summarize results
-#     print("Best: %f using %s" % (grid_result.best_score_, grid_result.best_params_))
-#     means = grid_result.cv_results_['mean_test_score']
-#     stds = grid_result.cv_results_['std_test_score']
-#     params = grid_result.cv_results_['params']
-#     for mean, stdev, param in zip(means, stds, params):
-#         print("%f (%f) with: %r" % (mean, stdev, param))
-
-# def tune_rf(X, y):
-
-#     from sklearn.model_selection import RandomizedSearchCV
-#     from sklearn.ensemble import RandomForestClassifier
-#     # define dataset
-#     # define models and parameters
-#     model = RandomForestClassifier()
-
-#     rand_grid = {'bootstrap': [True, False],
-#       'max_depth': [10, 25, 50, 100],
-#       'max_features': ['sqrt','log2'],
-#       'min_samples_leaf': [1, 2, 4],
-#       'min_samples_split': [2, 5, 10],
-#       'n_estimators': [10, 100, 500, 1000]}
-    
-#     # rand_grid = {'bootstrap': [True, False],
-#     #   'max_depth': [10, 20],
-#     #   'max_features': ['sqrt','log2'],
-#     #   'min_samples_leaf': [1, 2],
-#     #   'min_samples_split': [2, 5],
-#     #   'n_estimators': [100, 200]}
-    
-    
-#     # define grid search
-#     # grid = dict(n_estimators=n_estimators,max_features=max_features)
-#     cv = RepeatedStratifiedKFold(n_splits=10, n_repeats=3, random_state=1)
-#     # grid_search = GridSearchCV(estimator=model, param_grid=grid, n_jobs=-1, cv=cv, scoring='roc_auc',error_score=0)
-#     # grid_result = grid_search.fit(X, y)
-    
-#     grid_search = RandomizedSearchCV(estimator=model, param_distributions=rand_grid, n_jobs=-1, cv=cv, scoring='roc_auc')
-#     grid_result = grid_search.fit(X, y)
-    
-#     # summarize results
-#     print("Best: %f using %s" % (grid_result.best_score_, grid_result.best_params_))
-#     means = grid_result.cv_results_['mean_test_score']
-#     stds = grid_result.cv_results_['std_test_score']
-#     params = grid_result.cv_results_['params']
-#     for mean, stdev, param in zip(means, stds, params):
-#         print("%f (%f) with: %r" % (mean, stdev, param))
-
-
-      
-    
-   
-
 
 def bootstrap(datax,datay):    
     # combined with bootstrap
@@ -359,7 +285,8 @@ def preprocess(X_train, y_train, X_test, cols, fs_to_imp):
     if md_strategy:    
        imp = SimpleImputer(missing_values=np.nan, strategy='median')   
     else: 
-       imp = SimpleImputer(missing_values=np.nan, strategy='constant', fill_value = -1)  
+       # imp = SimpleImputer(missing_values=np.nan, strategy='constant', fill_value = -1) 
+       imp = SimpleImputer(missing_values=np.nan, strategy='most_frequent')
     imp.fit(X[fs_to_imp]) 
     impdata = imp.transform(X[fs_to_imp])
     impdata_test = imp.transform(X_test[fs_to_imp])          
@@ -414,29 +341,18 @@ def preprocess(X_train, y_train, X_test, cols, fs_to_imp):
         else:
            preprocessed_X = np.concatenate((preprocessed_X, out), axis = 1)
            preprocessed_X_test = np.concatenate((preprocessed_X_test, out_test), axis = 1)    
-           
-        # L = out.shape[1]
-        # print(L)
-        # N = -1-L+1
-        # print(N)
-        # print(atmp[N:][0])
-        # print(key)
-        # print(encoding_head)
-        # if value == 0:
-           
+                      
         cnt += 1
-    #encoding_head_flat = [j for i in encoding_head for j in i]      
-    #print(len(encoding_head))    
-    
     return preprocessed_X, y72, preprocessed_X_test, encoding_head
    
-
 def cls_constructor(clfname, params):
     
     if clfname == 'lg':    
        clf = LogisticRegression(**params, random_state=0, max_iter=5000)       
     elif clfname == 'rf':    
        clf = RandomForestClassifier(**params, random_state=0)       
+    elif clfname == 'xgb':  
+       clf = xgb.XGBClassifier(**params, use_label_encoder=False)
     else:
        print('no matched cls')
     return clf    
@@ -444,74 +360,76 @@ def cls_constructor(clfname, params):
     # elif clfname == 'xgb':  
     #    clf = xgb.XGBClassifier(**params,use_label_encoder=False)
 
-           
-def run_models(X_train_c, y_train_c, preprocessed_X_test, y_test, model_strat, encoding_head, data_root_folder, best_hyperparams):
+def run_models(X_train_c, y_train_c, preprocessed_X_test, y_test, model_strat, encoding_head, data_root_folder, best_hyperparams, class_weight_apply, seed_tag):
     
-    ## 跑model      
+    # 調整class weight的話, 在training的時候就不bootstrap     
+    if class_weight_apply == False:
+        set_bootstrap = True
+    else:   
+        set_bootstrap = False
+    
+    # set_bootstrap = False
+    
+    #
+    params = {} 
     if class_weight_apply == False:     
-       if best_hyperparams:   
-          params = best_hyperparams['lg']      
-       else:
-          params = {} 
-    else:
-       if best_hyperparams:
+        if best_hyperparams:   
+          params = best_hyperparams['lg']              
+    elif class_weight_apply == True:    
+        if best_hyperparams:
           params = best_hyperparams['lg']
           params['class_weight'] = {0:0.05,1:0.95}
-       else: 
-          params = {} 
+        else: 
           params['class_weight'] = {0:0.05,1:0.95}
           
     clf1 = cls_constructor('lg', params)      
     print('running LG')
-    bst_lg, models, kidx, aucs_lg = ml_model(clf1, X_train_c, y_train_c)
+    bst_lg, _, _, aucs_lg = ml_model(clf1, X_train_c, y_train_c, set_bootstrap)
     
     # LG imp
     imp = pd.DataFrame(data = abs(bst_lg.coef_[0]),columns = ['lg_beta'])
     head = pd.DataFrame(data = encoding_head,columns = ['features'])
     imp_LG = pd.concat([imp, head],axis = 1)
-    # print(imp_LG.sort_values(by=['lg_beta'],ascending = False))
-    
-    params = {}
+
+
+    #    
+    params = {} 
     if class_weight_apply == False:     
-       if best_hyperparams:   
-          params = best_hyperparams['rf']      
-       else:
-          params = {} 
-    else:
-       if best_hyperparams:
+        if best_hyperparams:   
+          params = best_hyperparams['rf']              
+    elif class_weight_apply == True:    
+        if best_hyperparams:
           params = best_hyperparams['rf']
           params['class_weight'] = {0:0.05,1:0.95}
-       else: 
-          params = {} 
-          params['class_weight'] = {0:0.05,1:0.95}   
+        else: 
+          params['class_weight'] = {0:0.05,1:0.95}
           
     clf2 = cls_constructor('rf', params)      
     print('running RF')
-    bst_rf, models, kidx, aucs_rf = ml_model(clf2, X_train_c, y_train_c)
+    bst_rf, _, _, aucs_rf = ml_model(clf2, X_train_c, y_train_c, set_bootstrap)
     
     # 
     imp = pd.DataFrame(data = abs(bst_rf.feature_importances_),columns = ['rf_importance'])
     imp_RF = pd.concat([imp, head],axis = 1)
-    # print(imp_RF.sort_values(by=['rf_importance'],ascending = False))
     
     
+    #
     print('running XGB')  
     if class_weight_apply == False:     
-       if best_hyperparams:   
-          bst_xgb, params_xgb = model_xgb(xgb, X_train_c, y_train_c, best_hyperparams['xgb'])      
-       else:
+        if best_hyperparams:   
+          bst_xgb, bst_xgb2 = model_xgb(xgb, X_train_c, y_train_c, best_hyperparams['xgb'])      
+        else:
           bst_xgb, bst_xgb2 = model_xgb(xgb, X_train_c, y_train_c, best_hyperparams)
-    else: 
-       if best_hyperparams:
+    elif class_weight_apply == True:    
+        if best_hyperparams:
           best_hyperparams['xgb']['scale_pos_weight'] = 16 
-          bst_xgb, params_xgb = model_xgb(xgb, X_train_c, y_train_c, best_hyperparams['xgb'])  
-       else:
+          bst_xgb, bst_xgb2 = model_xgb(xgb, X_train_c, y_train_c, best_hyperparams['xgb'])  
+        else:
           best_hyperparams['scale_pos_weight'] = 16   
-          bst_xgb, params_xgb = model_xgb(xgb, X_train_c, y_train_c, best_hyperparams)
-  
-    # clf3 = cls_constructor('xgb', params_xgb)      
-    # bst_xgb2, _, kidx, aucs_xgb = ml_model(params_xgb, X_train_c, y_train_c)
-    # bst_xgb2 = params_xgb
+          bst_xgb, bst_xgb2 = model_xgb(xgb, X_train_c, y_train_c, best_hyperparams)
+      
+    _, _, _, aucs_xgb = ml_model(bst_xgb2, X_train_c, y_train_c, set_bootstrap)
+
     # different type of feature imp for xgb 
     dictA = bst_xgb.get_score(importance_type = 'weight')
     dictB = bst_xgb.get_score(importance_type = 'gain')
@@ -520,13 +438,41 @@ def run_models(X_train_c, y_train_c, preprocessed_X_test, y_test, model_strat, e
     dictE = bst_xgb.get_score(importance_type = 'total_cover')
     impXGB = [dictA, dictB, dictC, dictD, dictE]
     
-       
+    
+    #     
     clf4 = LinearSVC(random_state=0, tol=1e-5, dual=False, max_iter = 10000) 
     print('running SVC')
-    bst_svm, models, kidx, aucs_svm = ml_model(clf4, X_train_c, y_train_c)
+    bst_svm, _, _, aucs_svm = ml_model(clf4, X_train_c, y_train_c, set_bootstrap)
 
-    eclf1 = VotingClassifier(estimators=[('lg', bst_lg), ('rf', bst_rf), ('xgb', bst_xgb2)], voting='soft', weights = [2.5,5,5])
-    bst_eclf, models, kidx, aucs_eclf = ml_model(eclf1, X_train_c, y_train_c)
+
+    tune_voting_weight = False
+    
+    if tune_voting_weight == False: 
+       eclf1 = VotingClassifier(estimators=[('lg', bst_lg), ('rf', bst_rf), ('xgb', bst_xgb2)], voting='soft', weights = [1,2,1]) # 2.5, 5, 5
+       bst_eclf, models, kidx, aucs_eclf = ml_model(eclf1, X_train_c, y_train_c, set_bootstrap)
+    else:
+       
+       v_weights = [ [1,1,1], [1,2,1], [1,1,2], [1,2,2], [2,1,1], [2,1,2], [2,2,1], [1,1,1], [1,6,1], [1,1,6], [1,6,6], [6,1,1], [6,1,6], [6,6,1], [1,1,1], [1,10,1], [1,1,10], [1,10,10], [10,1,1], [10,1,10], [10,10,1], [1,1,1], [1,14,1], [1,1,14], [1,14,14], [14,1,1], [14,1,14], [14,14,1],[1,1,1], [1,18,1], [1,1,18], [1,18,18], [18,1,1], [18,1,18], [18,18,1] ]
+                                                                 
+                     # [1,1,1], [1,14,1], [1,1,14], [1,14,14], [14,1,1], [14,1,14], [14,14,1], \
+                     # [1,1,1], [1,18,1], [1,1,18], [1,18,18], [18,1,1], [18,1,18], [18,18,1] ]
+
+       best_weight_comb = []
+       for i in v_weights:
+           eclf1 = VotingClassifier(estimators=[('lg', bst_lg), ('rf', bst_rf), ('xgb', bst_xgb2)], voting='soft', weights = i)
+           bst_eclf, models, kidx, aucs_eclf = ml_model(eclf1, X_train_c, y_train_c, set_bootstrap)
+           best_weight_comb.append(aucs_eclf[0])
+           print(i)
+           print(aucs_eclf[0])
+             
+       bst_weight_idx = np.argmax(best_weight_comb)    
+        
+       print('best_voting weight')
+       print(v_weights[bst_weight_idx])
+        
+        # apply best voting weight
+       eclf1 = VotingClassifier(estimators=[('lg', bst_lg), ('rf', bst_rf), ('xgb', bst_xgb2)], voting='soft', weights = v_weights[bst_weight_idx])
+       bst_eclf, models, kidx, aucs_eclf = ml_model(eclf1, X_train_c, y_train_c, set_bootstrap)
     
     cm_lg, cp_lg, others_lg = model_result(y_test, bst_lg, 'LG', preprocessed_X_test)
     cm_rf, cp_rf, others_rf  = model_result(y_test, bst_rf, 'RF', preprocessed_X_test)
@@ -534,7 +480,6 @@ def run_models(X_train_c, y_train_c, preprocessed_X_test, y_test, model_strat, e
     cm_sv, cp_sv, others_sv  = model_result(y_test, bst_svm, 'SVM', preprocessed_X_test)
     cm_ec, cp_ec, others_ec  = model_result(y_test, bst_eclf, 'ECLF', preprocessed_X_test)
 
-     # metrics.plot_roc_curve(bst_lg, preprocessed_X_test, y_test)
     models_ = {}
     lg_auc, lgprc, lg_yscore, fpr, tpr = model_auc(bst_lg, preprocessed_X_test, y_test)
     models_['lg'] = (fpr, tpr, lg_auc, aucs_lg, lg_yscore)
@@ -543,8 +488,9 @@ def run_models(X_train_c, y_train_c, preprocessed_X_test, y_test, model_strat, e
     svm_auc, svmprc, svm_yscore, fpr, tpr = model_auc(bst_svm, preprocessed_X_test, y_test)
     models_['svm'] = (fpr, tpr, svm_auc, aucs_svm, svm_yscore)
     ec_auc, ecprc, ec_yscore, fpr, tpr = model_auc(bst_eclf, preprocessed_X_test, y_test)
+    print(ec_auc)
     models_['ec'] = (fpr, tpr, ec_auc, aucs_eclf, ec_yscore)
-     # xgb test part 跟別人不同分開寫
+      # xgb test part 跟別人不同分開寫
     dtest = xgb.DMatrix(preprocessed_X_test , label = y_test)
     xgb_yscore = bst_xgb.predict(dtest)
     fpr, tpr, _ = roc_curve(y_test, xgb_yscore)
@@ -570,34 +516,19 @@ def run_models(X_train_c, y_train_c, preprocessed_X_test, y_test, model_strat, e
     print('EC')
     tb5 = table_r(cp_ec,cm_ec,ec_auc,others_ec)
      
-    filename = 'M'+model_strat+'result.txt'
+    filename = 'M'+model_strat+'result_seed'+str(seed_tag)+'.txt'
     ftb = 'LG' + '\n' + tb1 + '\n' +'RF' + '\n' + tb2 + '\n' +'XGB' + '\n' + tb3 + '\n' +'SVM' + '\n' + tb4 + '\n' +'EC' + '\n' + tb5 + '\n'
                 
     ftb2 = ftb+'\n'+'train_size:'+str(X_train_c.shape[0])+'\n'+'test_size:'+str(preprocessed_X_test.shape[0])
     
     with open(data_root_folder+filename, 'w') as f:
-         f.write(ftb2)
-      
+          f.write(ftb2)    
+
+    return models_, bst_eclf, bst_xgb2, bst_rf, bst_lg 
         
-    return models_   
+
    ############################### 
     
-    # # finding the best weight for voting classifier
-    # weights_comb = [[3,3.5,3.5],[5,2.5,2.5],[7,1.5,1.5],[9,0.5,0.5]]
-    # weights_comb = [[3.5,3,3.5],[2.5,5,2.5],[1.5,7,1.5],[0.5,9,0.5]]
-    # weights_comb = [[3.5,3.5,3],[2.5,2.5,5],[1.5,1.5,7],[0.5,0.5,9]]
-    # for i in weights_comb:        
-    #     eclf1 = VotingClassifier(estimators=[('lg', clf1), ('rf', clf2), ('xgb', clf3)], voting='soft', weights = i)
-    #     bst_eclf, models, kidx, aucs_eclf = ml_model(eclf1, X_train_c, y_train_c)
-    #t     cm_ec, cp_ec = model_result(y_test, bst_eclf, 'ec', preprocessed_X_test)
-    #     ec_auc, ecprc = model_auc(bst_eclf, preprocessed_X_test, y_test)
-    #     print('wlg-%.2f wrf-%.2f wxgb-%.2f'  % (i[0], i[1], i[2]))
-    #     table_r(cp_ec,cm_ec,ec_auc)
-        # mean_auc = np.mean(aucs_eclf)
-        # print(mean_auc)
-        # print(confusion_matrix(y_test, bst_eclf.predict(preprocessed_X_test)))
-        # fpr, tpr, thresholds = metrics.roc_curve(y_test, bst_eclf.predict_proba(preprocessed_X_test)[:,1])
-        # print(metrics.auc(fpr, tpr))
 
 def rand_selection(xdata, ydata):
     
@@ -884,6 +815,9 @@ if __name__ == '__main__':
            
         #=== 切分 train and test set
         X_train, X_test, y_train, y_test = train_test_split(df_3, y72_3, test_size=0.2, random_state=40, stratify = y72_3)
+        # l = list(range(41,1000))
+        # seed_tag = random.sample(l, 1)[0]
+        # X_train, X_test, y_train, y_test = train_test_split(df_3, y72_3, test_size=0.2, random_state=seed_tag, stratify = y72_3)
     
         #了解那些是缺失的 
         pr = get_nan_pr(X_train,cols)
@@ -899,7 +833,18 @@ if __name__ == '__main__':
             miss_feature_copy.remove(i)
         
         assert(X_train_.shape[1] == len(cols_copy))
+        
+        # remove highly correlated feature 
+        # X_train_ = X_train_.drop(['ANISICCLSF_C','ANISICMIGD','ANISICMIGD_1','ANISICMIGD_3','BRTCNT','SPAO2','TMP','PULSE','BPS','BPB','SBP2','DBP2'], axis=1)
+        # X_test_ = X_test_.drop(['ANISICCLSF_C','ANISICMIGD','ANISICMIGD_1','ANISICMIGD_3','BRTCNT','SPAO2','TMP','PULSE','BPS','BPB','SBP2','DBP2'], axis=1)
+        # miss_feature_copy = ['ER_LOS','Dr_VSy','WEIGHT','in_SPAO2','in_BRTCNT','in_BPS','in_BPB','in_TMP','in_PULSE','SBP1','DBP1']
+        # col_to_drop = ['ANISICCLSF_C','ANISICMIGD','ANISICMIGD_1','ANISICMIGD_3','BRTCNT','SPAO2','TMP','PULSE','BPS','BPB','SBP2','DBP2']
+        # for i in col_to_drop:
+        #     cols_copy.pop(i)
+
         # 前處理 = 缺失處理>轉換
+        mice_imp_data = pd.read_csv('X_train_mice.csv')
+        X_train_ = mice_imp_data
         preprocessed_X, ytrain, preprocessed_X_test, encoding_head = preprocess(X_train_, y_train, X_test_, cols_copy, miss_feature_copy) 
                 
         #======imbalanced 處理？
@@ -909,11 +854,11 @@ if __name__ == '__main__':
            if not sub_model:
               n_seeds_num = 4000 # original 4000, 500 for 2nd return
            else:                
-              n_seeds_num = 50
+              n_seeds_num = 50  # original 50
                               
            reX = np.array([0])
            while reX.shape[0] < preprocessed_X_test.shape[0]:            
-                 undersample = OneSidedSelection(n_neighbors=1, n_seeds_S=n_seeds_num)
+                 undersample = OneSidedSelection(n_neighbors=1, n_seeds_S=n_seeds_num, random_state = 432)
                         #undersample = CondensedNearestNeighbour(n_neighbors=1, n_seeds_S=n_seeds_num)
                         #undersample = NearMiss(version=1,n_neighbors = 3)                               
                  reX, rey = undersample.fit_resample(preprocessed_X, ytrain.values)         
@@ -930,155 +875,76 @@ if __name__ == '__main__':
 #           X_train_c = reX.copy()
 #           y_train_c = rey.copy()
         
-        
+        # undersample.sample_indices_
+        xtrain_idx = np.array(X_train.index)
+        xtest_idx = np.array(X_test.index)
 
-        # whether tune XGB
-        
-        # best_hyperparams = tune_xgb(X_train_c,y_train_c)
-        # tuned params
-        best_hyperparams = {}
-        # a = {}
-        # a['C'] = 0.01
-        # a['penalty'] = 'l2'
-        # a['solver'] = 'lbfgs'
-        # best_hyperparams['lg'] = a
-        
-        # a = {}
-        # a['n_estimators'] = 1000
-        # a['min_samples_split'] = 10
-        # a['min_samples_leaf'] = 4
-        # a['max_features'] = 'sqrt'
-        # a['max_depth'] = 100
-        # a['bootstrap'] = False
-        # best_hyperparams['rf'] = a
-        
-        # a = {}
-        # a['colsample_bytree'] = 0.6139480884612674
-        # a['eta'] = 0.29102031122262007
-        # a['gamma'] = 1.718798165571878
-        # a['max_depth'] = 14
-        # a['min_child_weight'] = 1
-        # a['n_estimators'] = 10
-        # a['subsample'] = 0.8771867793610909
-        # best_hyperparams['xgb'] = a
-                
-        class_weight_apply = False
-   
-
+        abp_model_idices = {}
+        abp_model_idices['train'] = xtrain_idx
+        abp_model_idices['test'] = xtest_idx
         # 就跑模型吧
-        # models_out = run_models(X_train_c, y_train_c, preprocessed_X_test, y_test, '腹痛', encoding_head, data_root_folder, best_hyperparams)
+        # models_out = run_models(X_train_c, y_train_c, preprocessed_X_test, y_test, '腹痛', encoding_head, data_root_folder, best_hyperparams, class_weight_apply)
         # run_models(df_sub_train[top30].values, y_train_c, df_sub_test[top30].values, y_test, key, top30, data_root_folder)
 
+        # save the data
+        # whether_save = True
+        # if whether_save:
+        #     import pickle
+            
+        #     data = {}
+        #     data['Xtrain'] = X_train_c
+        #     data['ytrain'] = y_train_c
+        #     data['Xtest'] = preprocessed_X_test
+        #     data['ytest'] = y_test
+        #     data['head'] = encoding_head
+            
+        #     with open('abdominal_pain_data.pickle', 'wb') as handle:
+        #           pickle.dump(data, handle, protocol=pickle.HIGHEST_PROTOCOL)
+    
+    
+## plot table 1   
+# from tableone import TableOne 
+# features = ['age1', 'SEX', 'INTY', 'ER_visit_365', 'ANISICCLSF_C', 'ER_LOS', 'TMP', 'PULSE', 'BPS', 'BPB', 'BRTCNT', 'xray', 'Echo', 'ct']
+# groupby = 'DPT2'
+# categorical = ['SEX','INTY','ANISICCLSF_C', 'xray', 'Echo', 'ct']  # 'blood_lab'
+# # nonnormal = ['bili']
+# mytable = TableOne(df_3, columns = features, categorical=categorical, groupby=groupby, pval=True)
 
-        # top 30 feature for prediction
-        # top30 = ['Free_typing', 'ER_visit_365', 'Ketorolac','ER_visit_30','Xrayh_T','WEIGHT','DD_visit_365','dxh137','dxh45','atc78','age1','ER_LOS','Dr_VSy','PULSE','in_PULSE','BPS','in_BPB','WEIGHT','in_BPS','x0_I69','dxh131','x0_M32','dxh32','x0_K51','x0_K70','x0_C73','x0_R30','dxh237','x0_C67']
-        # df_sub_train = pd.DataFrame(X_train_c, columns = encoding_head)
-        # df_sub_test = pd.DataFrame(preprocessed_X_test, columns = encoding_head)
-        # models30_out = run_models(df_sub_train[top30].values, y_train_c, df_sub_test[top30].values, y_test, '腹痛30', top30, data_root_folder, best_hyperparams)
-
-    
-        # with open('model_out_abdominal_pain.pickle', 'wb') as handle:
-        #       pickle.dump(models_out, handle, protocol=pickle.HIGHEST_PROTOCOL)
-     
-        
-        # with open('model_out_30_abdominal_pain.pickle', 'wb') as handle:
-        #       pickle.dump(models30_out, handle, protocol=pickle.HIGHEST_PROTOCOL)
-     
-        
-
-    
-    
-    
-    
-    
-# def xgb_objective(space):
-#     clf=xgb.XGBClassifier(n_estimators = space['n_estimators'],
-#                     eta = space['eta'],
-#                     subsample = space['subsample'],
-#                     max_depth = space['max_depth'], 
-#                     gamma = space['gamma'],
-#                     min_child_weight=space['min_child_weight'],
-#                     colsample_bytree=space['colsample_bytree'],
-#                     use_label_encoder=False)
-#     evaluation = [( train_x, train_y), ( val_x, val_y)]                
-#     # print(evaluation)                
-#     clf.fit(train_x, train_y, eval_set=evaluation, eval_metric="auc", 
-#         early_stopping_rounds=30)
-        
-#     pred = clf.predict_proba(train_x)[:,1]                  
-#     auc_ = roc_auc_score(train_y, pred)
-    
-#     print("AUC score:", auc_)
-    
-#     return{'loss':str(1-auc_), 'status': STATUS_OK }
-    # return STATUS_OK
-    # Baysian Opt
-
-# space={
-# 'max_depth': hp.choice('max_depth', np.arange(3, 18, 1, dtype=int)),
-# 'gamma': hp.uniform('gamma', 1,9),
-# 'colsample_bytree' : hp.uniform('colsample_bytree', 0.5,1),
-# 'subsample' : hp.uniform('subsample', 0.5,1),
-# 'min_child_weight' : hp.choice('min_child_weight', np.arange(0, 10, 1, dtype=int)), 
-# 'eta' : hp.uniform('eta', 0.005, 0.3),
-# 'n_estimators' : hp.choice('n_estimators', np.arange(20, 200, 5, dtype=int)),
-# 'seed': 0
-# }
-
-
-
-# train_x, val_x, train_y, val_y = train_test_split(X_train_c, y_train_c, test_size=1/8, random_state=40, stratify = y_train_c) 
-    
-#      # define objective function
-# best_hyperparams = fmin(fn = xgb_objective,
-#                 space = space,
-#                 algo = tpe.suggest,
-#                 max_evals = 100,
-#                 trials = Trials())
-
-    
-
-
-    
-    
-
+# print(mytable.tabulate(tablefmt="github"))
 # end of the code
+
+# import shap
+# explainer = shap.Explainer(bst_xgb)
+# shap_values = explainer(X_train_c)
+
+# # visualize the first prediction's explanation
+# shap.plots.waterfall(shap_values[0])
+
+
+#    shap_values = shap.TreeExplainer(bst_rf).shap_values(X_train_c)
+#  # shap_values = shap.explainers.Linear(bst_lg, X_train_c).shap_values(X_train_c)
+# # # shap.summary_plot(shap_values, X_train, plot_type="bar")
+
+# adata = pd.DataFrame(X_train_c,columns = encoding_head)
+# shap.summary_plot(shap_values, adata, plot_type="bar")
+
+# # # j = 1
+
+# # explainerModel = shap.TreeExplainer(bst_xgb)
+# # shap_values_Model = explainerModel.shap_values(X_train_c)
+# # p = shap.force_plot(explainerModel.expected_value, shap_values_Model[j], adata.iloc[[j]], matplotlib = True, show = False)
+# # plt.savefig('tmp.png')
+# # # plt.close()
+
+# shap.summary_plot(shap_values, features=adata, feature_names=adata.columns)
+# plt.savefig('shap_imp.png')
+# plt.show()
+
+
+
+# plt.show()
 # NOTE =============================================================================================
-    # # save data for autoML
-    # import pickle
-
-    # ehr_processed = {}
-    # ehr_processed['Xtrain'] = X_train_c
-    # ehr_processed['ytrain'] = y_train_c
-    # ehr_processed['Xtest'] = preprocessed_X_test
-    # ehr_processed['ytest'] = y_test
-
-    # with open("ehr_processed.pickle","wb") as f:
-    #     pickle.dump( ehr_processed, f)
-
-    # autoML
-
-
-# after u pull ur images
-# (base) anpo@anpo-linux-2f:~$ docker images 
-# Got permission denied while trying to connect to the Docker daemon socket at unix:///var/run/docker.sock: Get http://%2Fvar%2Frun%2Fdocker.sock/v1.40/images/json: dial unix /var/run/docker.sock: connect: permission denied
-# (base) anpo@anpo-linux-2f:~$ sudo docker images 
-# REPOSITORY             TAG                 IMAGE ID            CREATED             SIZE
-# mfeurer/auto-sklearn   master              d6bb7d7fbfab        5 days ago          1.23GB
-# (base) anpo@anpo-linux-2f:~$ docker run -it mfeurer/auto-sklearn:master
-# docker: Got permission denied while trying to connect to the Docker daemon socket at unix:///var/run/docker.sock: Post http://%2Fvar%2Frun%2Fdocker.sock/v1.40/containers/create: dial unix /var/run/docker.sock: connect: permission denied.
-# See 'docker run --help'.
-# (base) anpo@anpo-linux-2f:~$ sudo docker run -it mfeurer/auto-sklearn:master
-# root@0c3438ff51ec:/auto-sklearn# 
-
-# python3
-
-#sudo docker ps 
-# 查containerID
-#sudo docker cp /home/anpo/Desktop/pyscript/EDr_72/ehr_processed.pickle 97a8233ac77e:/auto-sklearn/autosklearn
-
-
-
+ 
 
 
 ## save for mat 
@@ -1276,30 +1142,3 @@ if __name__ == '__main__':
 #     return data
 
 
-# 改寫general
-# def add_cut(data, lab, t):
-#     tmp = data[lab]
-#     if len(t) == 1:
-#         boolidx = tmp>=t[0]
-#         data[lab] = boolidx.eq(True).mul(1)
-#     elif len(t) == 2:
-#         boolidx1 = tmp<=t[0] 
-#         boolidx2 =(tmp>t[0]) & (tmp<=t[1]) 
-#         boolidx3 = tmp>t[1]      
-#         out = boolidx1.eq(True).mul(0)
-#         out2 = boolidx2.eq(True).mul(1)
-#         out3 = boolidx3.eq(True).mul(2)      
-#         data[lab] = out | out2 | out3
-#     elif len(t) == 3: 
-#         boolidx1 = tmp<=t[0] 
-#         boolidx2 =(tmp>t[0]) & (tmp<=t[1]) 
-#         boolidx3 =(tmp>t[1]) & (tmp<=t[2])  
-#         boolidx4 = tmp>t[2]
-#         out = boolidx1.eq(True).mul(0)
-#         out2 = boolidx2.eq(True).mul(1)
-#         out3 = boolidx3.eq(True).mul(2) 
-#         out4 = boolidx4.eq(True).mul(3) 
-#         data[lab] = out | out2 | out3 | out4
-#     else:
-#         print('converting error, out of n cat')
-#     return data  
